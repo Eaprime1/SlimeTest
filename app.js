@@ -10,7 +10,7 @@ import { RewardTracker, EpisodeManager, updateFindTimeEMA, calculateAdaptiveRewa
 import { CEMLearner, TrainingManager } from './learner.js';
 import { TrainingUI } from './trainingUI.js';
 import { visualizeScentGradient, visualizeScentHeatmap } from './scentGradient.js';
-import { FertilityGrid, attemptSeedDispersal, attemptSpontaneousGrowth, getResourceSpawnLocation } from './plantEcology.js';
+import { FertilityGrid, attemptSeedDispersal, attemptSpontaneousGrowth, getResourceSpawnLocation, getSpawnPressureMultiplier } from './plantEcology.js';
 
 (() => {
     const canvas = document.getElementById("view");
@@ -74,6 +74,7 @@ import { FertilityGrid, attemptSeedDispersal, attemptSpontaneousGrowth, getResou
     // ---------- Helpers ----------
     const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
     const mix = (a,b,t)=>a+(b-a)*t;
+    const randomRange = (min, max) => Math.random() * (max - min) + min;
     const smoothstep = (e0,e1,x)=> {
       const t = clamp((x - e0) / Math.max(1e-6, e1 - e0), 0, 1);
       return t * t * (3 - 2 * t);
@@ -832,28 +833,79 @@ import { FertilityGrid, attemptSeedDispersal, attemptSpontaneousGrowth, getResou
       /**
        * Check if this agent can perform mitosis
        */
+      meetsPopulationLimits() {
+        const aliveCount = World.bundles.filter(b => b.alive).length;
+        const aliveLimit = Math.min(
+          CONFIG.mitosis.maxAgents,
+          CONFIG.mitosis.maxAliveAgents || CONFIG.mitosis.maxAgents
+        );
+        if (aliveCount >= aliveLimit) return false;
+
+        if (CONFIG.mitosis.respectCarryingCapacity) {
+          const maxPopulation = Math.max(
+            aliveLimit,
+            Math.floor(
+              World.resources.length * CONFIG.mitosis.carryingCapacityMultiplier
+            )
+          );
+          if (aliveCount >= maxPopulation) return false;
+        }
+
+        return true;
+      }
+
       canMitosis() {
         if (!CONFIG.mitosis.enabled) return false;
         if (!this.alive) return false;
         if (this.chi < CONFIG.mitosis.threshold) return false;
-        
-        // Check cooldown
+
         const ticksSinceLastMitosis = globalTick - this.lastMitosisTick;
         if (ticksSinceLastMitosis < CONFIG.mitosis.cooldown) return false;
-        
-        // Check population cap (count only ALIVE agents, not dead ones!)
-        const aliveCount = World.bundles.filter(b => b.alive).length;
-        if (aliveCount >= CONFIG.mitosis.maxAgents) return false;
-        
-        // Check carrying capacity (if enabled)
-        if (CONFIG.mitosis.respectCarryingCapacity) {
-          const maxPopulation = Math.floor(
-            World.resources.length * CONFIG.mitosis.carryingCapacityMultiplier
-          );
-          if (aliveCount >= maxPopulation) return false;
+
+        return this.meetsPopulationLimits();
+      }
+
+      canBud() {
+        if (!CONFIG.mitosis.enabled) return false;
+        if (!this.alive) return false;
+
+        const buddingThreshold = CONFIG.mitosis.buddingThreshold || Infinity;
+        if (this.chi < buddingThreshold) return false;
+
+        if (CONFIG.mitosis.buddingRespectCooldown !== false) {
+          const ticksSinceLastMitosis = globalTick - this.lastMitosisTick;
+          if (ticksSinceLastMitosis < CONFIG.mitosis.cooldown) return false;
         }
-        
-        return true;
+
+        return this.meetsPopulationLimits();
+      }
+
+      spawnChild(childX, childY, childChi, heading, eventLabel) {
+        const childId = World.nextAgentId++;
+        const child = new Bundle(
+          childX,
+          childY,
+          this.size,
+          childChi,
+          childId,
+          this.useController
+        );
+
+        child.heading = heading;
+        child._lastDirX = Math.cos(heading);
+        child._lastDirY = Math.sin(heading);
+        child.controller = this.controller;
+        child.extendedSensing = this.extendedSensing;
+        child.generation = this.generation + 1;
+        child.parentId = this.id;
+        child.lastMitosisTick = globalTick;
+
+        World.bundles.push(child);
+        World.totalBirths++;
+
+        console.log(`🧫 ${eventLabel}! Agent ${this.id} (gen ${this.generation}) → Agent ${child.id} (gen ${child.generation}) | Pop: ${World.bundles.length}`);
+
+        return child;
       }
 
       /**
@@ -863,54 +915,54 @@ import { FertilityGrid, attemptSeedDispersal, attemptSpontaneousGrowth, getResou
       doMitosis() {
         if (!this.canMitosis()) return null;
         
-        // Pay reproduction cost
         this.chi -= CONFIG.mitosis.cost;
-        
-        // Calculate spawn position (offset from parent)
-        const angle = CONFIG.mitosis.inheritHeading 
+
+        const angle = CONFIG.mitosis.inheritHeading
           ? this.heading + (Math.random() - 0.5) * CONFIG.mitosis.headingNoise
           : Math.random() * Math.PI * 2;
-        
+
         const offset = CONFIG.mitosis.spawnOffset;
-        let childX = this.x + Math.cos(angle) * offset;
-        let childY = this.y + Math.sin(angle) * offset;
-        
-        // Keep child in bounds
         const half = this.size / 2;
-        childX = clamp(childX, half, innerWidth - half);
-        childY = clamp(childY, half, innerHeight - half);
-        
-        // Generate new ID (use next available)
-        const childId = World.nextAgentId++;
-        
-        // Create child
-        const child = new Bundle(
-          childX, childY,
-          this.size,
+        const childX = clamp(this.x + Math.cos(angle) * offset, half, innerWidth - half);
+        const childY = clamp(this.y + Math.sin(angle) * offset, half, innerHeight - half);
+
+        const child = this.spawnChild(
+          childX,
+          childY,
           CONFIG.mitosis.childStartChi,
-          childId,
-          this.useController
+          angle,
+          "Mitosis"
         );
-        
-        // Inherit properties from parent
-        child.heading = angle;
-        child._lastDirX = Math.cos(angle);
-        child._lastDirY = Math.sin(angle);
-        child.controller = this.controller; // Share policy (if any)
-        child.extendedSensing = this.extendedSensing;
-        child.generation = this.generation + 1;
-        child.parentId = this.id;
-        child.lastMitosisTick = globalTick; // Prevent immediate re-mitosis
-        
-        // Update parent's mitosis tracking
+
         this.lastMitosisTick = globalTick;
-        
-        // Add child to world
-        World.bundles.push(child);
-        World.totalBirths++;
-        
-        console.log(`🧫 Mitosis! Agent ${this.id} (gen ${this.generation}) → Agent ${child.id} (gen ${child.generation}) | Pop: ${World.bundles.length}`);
-        
+
+        return child;
+      }
+
+      doBudding() {
+        if (!this.canBud()) return null;
+
+        const share = clamp(
+          CONFIG.mitosis.buddingShare ?? 0.5,
+          0.05,
+          0.95
+        );
+        const childChi = this.chi * share;
+        this.chi *= (1 - share);
+
+        const jitter = CONFIG.mitosis.buddingOffset ?? 20;
+        const half = this.size / 2;
+        const childX = clamp(this.x + randomRange(-jitter, jitter), half, innerWidth - half);
+        const childY = clamp(this.y + randomRange(-jitter, jitter), half, innerHeight - half);
+
+        const angle = CONFIG.mitosis.inheritHeading
+          ? this.heading
+          : Math.random() * Math.PI * 2;
+
+        const child = this.spawnChild(childX, childY, childChi, angle, "Budding");
+
+        this.lastMitosisTick = globalTick;
+
         return child;
       }
 
@@ -918,7 +970,9 @@ import { FertilityGrid, attemptSeedDispersal, attemptSpontaneousGrowth, getResou
        * Attempt mitosis if conditions are met (called each frame)
        */
       attemptMitosis() {
-        if (this.canMitosis()) {
+        if (this.canBud()) {
+          this.doBudding();
+        } else if (this.canMitosis()) {
           this.doMitosis();
         }
       }
@@ -1294,15 +1348,18 @@ import { FertilityGrid, attemptSeedDispersal, attemptSpontaneousGrowth, getResou
         // Plant ecology: show resource count with dynamic limit if enabled
         if (CONFIG.resourceScaleWithAgents) {
           const aliveCount = World.bundles.filter(b => b.alive).length;
+          const spawnPressure = CONFIG.plantEcology.spawnPressure;
+          const minResourceMultiplier = spawnPressure?.minResourceMultiplier ?? spawnPressure?.minSeedMultiplier ?? 1;
+          const pressureMultiplier = getSpawnPressureMultiplier(aliveCount, minResourceMultiplier);
           const maxResources = Math.floor(
             clamp(
-              CONFIG.resourceBaseAbundance - (aliveCount * CONFIG.resourceCompetition),
+              CONFIG.resourceBaseAbundance * pressureMultiplier,
               CONFIG.resourceScaleMinimum,
               CONFIG.resourceScaleMaximum
             )
           );
-          const competition = (aliveCount * CONFIG.resourceCompetition).toFixed(1);
-          resourceInfo = `🌿 resources: ${World.resources.length}/${maxResources} (${aliveCount} agents | -${competition} competition)`;
+          const pressurePct = Math.round((1 - pressureMultiplier) * 100);
+          resourceInfo = `🌿 resources: ${World.resources.length}/${maxResources} (${aliveCount} agents | pressure ${pressurePct}%)`;
         } else {
           resourceInfo = `🌿 resources: ${World.resources.length} | plants: ${World.carryingCapacity}`;
         }
@@ -1438,44 +1495,45 @@ import { FertilityGrid, attemptSeedDispersal, attemptSpontaneousGrowth, getResou
         if (CONFIG.plantEcology.enabled && FertilityField) {
           // Calculate dynamic resource limit based on living agents (INVERSE: more agents = less food)
           let maxResources = CONFIG.resourceStableMax;
+          const aliveCount = World.bundles.filter(b => b.alive).length;
+
           if (CONFIG.resourceScaleWithAgents) {
-            const aliveCount = World.bundles.filter(b => b.alive).length;
-            // Inverse relationship: start with base abundance, reduce per agent
+            const spawnPressure = CONFIG.plantEcology.spawnPressure;
+            const minResourceMultiplier = spawnPressure?.minResourceMultiplier ?? spawnPressure?.minSeedMultiplier ?? 1;
+            const pressureMultiplier = getSpawnPressureMultiplier(aliveCount, minResourceMultiplier);
+            const targetAbundance = CONFIG.resourceBaseAbundance * pressureMultiplier;
             maxResources = Math.floor(
               clamp(
-                CONFIG.resourceBaseAbundance - (aliveCount * CONFIG.resourceCompetition),
+                targetAbundance,
                 CONFIG.resourceScaleMinimum,
                 CONFIG.resourceScaleMaximum
               )
             );
-            
-            // Cull excess resources if population has grown (competition increases)
-            if (World.resources.length > maxResources) {
-              const excess = World.resources.length - maxResources;
-              // Remove oldest/least fertile resources
-              World.resources.splice(-excess, excess);
-              console.log(`🔪 Culled ${excess} excess resources due to competition (${aliveCount} agents)`);
-            }
           }
-          
+
+          if (World.resources.length > maxResources) {
+            const excess = World.resources.length - maxResources;
+            World.resources.splice(-excess, excess);
+            console.log(`🔪 Culled ${excess} excess resources due to competition (${aliveCount} agents)`);
+          }
+
           // Seed dispersal (resources spawn near existing ones)
-          const seedLocation = attemptSeedDispersal(World.resources, FertilityField, globalTick);
+          const seedLocation = attemptSeedDispersal(World.resources, FertilityField, globalTick, dt, aliveCount);
           if (seedLocation && World.resources.length < maxResources) {
             const newResource = new Resource(seedLocation.x, seedLocation.y, CONFIG.resourceRadius);
             World.resources.push(newResource);
             console.log(`🌱 Seed sprouted at (${Math.round(seedLocation.x)}, ${Math.round(seedLocation.y)}) | Fertility: ${seedLocation.fertility.toFixed(2)}`);
           }
-          
+
           // Spontaneous growth (resources appear in fertile soil)
-          const growthLocation = attemptSpontaneousGrowth(FertilityField);
+          const growthLocation = attemptSpontaneousGrowth(FertilityField, dt, aliveCount);
           if (growthLocation && World.resources.length < maxResources) {
             const newResource = new Resource(growthLocation.x, growthLocation.y, CONFIG.resourceRadius);
             World.resources.push(newResource);
             console.log(`🌿 Spontaneous growth at (${Math.round(growthLocation.x)}, ${Math.round(growthLocation.y)}) | Fertility: ${growthLocation.fertility.toFixed(2)}`);
           }
-          
+
           // Update fertility grid (recovery + population pressure)
-          const aliveCount = World.bundles.filter(b => b.alive).length;
           FertilityField.update(dt, aliveCount, globalTick);
         }
 
