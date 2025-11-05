@@ -531,4 +531,204 @@ export const CONFIG_SCHEMA = {
     "bondLoss.onDeathBoostDuration": { label: "On-death boost duration", min: 0, max: 10000, step: 10 },
   },
 };
+// ===== Config Manager & Panel =====
+const PROFILES_KEY = "slime.presets.v1";
+
+const ConfigIO = {
+  // safely get/set nested CONFIG by "a.b.c"
+  get(path) {
+    const parts = path.split(".");
+    let cur = CONFIG;
+    for (const p of parts) cur = cur?.[p];
+    return cur;
+  },
+  set(path, value) {
+    const parts = path.split(".");
+    let cur = CONFIG;
+    for (let i=0; i<parts.length-1; i++) cur = cur[parts[i]];
+    cur[parts[parts.length-1]] = value;
+  },
+  snapshot() {
+    // capture only schema-listed keys to keep profiles tiny
+    const shot = {};
+    for (const group of Object.values(CONFIG_SCHEMA)) {
+      for (const path of Object.keys(group)) shot[path] = this.get(path);
+    }
+    // include a tiny version and timestamp for sanity
+    return { version: 1, ts: Date.now(), params: shot };
+  },
+  apply(snapshot) {
+    if (!snapshot?.params) return;
+    for (const [path, val] of Object.entries(snapshot.params)) {
+      if (CONFIG_SCHEMA && findPathInSchema(path)) this.set(path, val);
+    }
+    onConfigChanged();
+  },
+  loadProfiles() {
+    try { return JSON.parse(localStorage.getItem(PROFILES_KEY) || "[]"); }
+    catch { return []; }
+  },
+  saveProfiles(list) {
+    localStorage.setItem(PROFILES_KEY, JSON.stringify(list));
+  }
+};
+
+function findPathInSchema(path){
+  for (const group of Object.values(CONFIG_SCHEMA)) {
+    if (Object.prototype.hasOwnProperty.call(group, path)) return true;
+  }
+  return false;
+}
+
+function onConfigChanged() {
+  // react to critical changes
+  // If trailCell changed, resize trail grid:
+  if (Trail && Trail.cell !== CONFIG.trailCell) Trail.resize();
+  // You can add other “apply” hooks as needed.
+}
+
+// ---- UI builder ----
+let panelOpen = false;
+function buildConfigPanel(){
+  // panel shell
+  const wrap = document.createElement("div");
+  wrap.id = "config-panel";
+  Object.assign(wrap.style, {
+    position: "fixed", top: "0", right: "0", bottom: "0",
+    width: "360px", background: "rgba(12,12,16,0.96)", color:"#e6f3ec",
+    font: "12px ui-mono, Menlo, monospace", zIndex: 99999,
+    borderLeft: "1px solid #233", padding: "10px", overflowY: "auto",
+    display: "none"
+  });
+  wrap.innerHTML = `
+    <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+      <strong style="font-size:13px;">Slime Config</strong>
+      <button id="cfg-close" style="margin-left:auto;">✕</button>
+    </div>
+    <div id="cfg-profiles" style="display:flex; gap:6px; margin-bottom:8px;">
+      <select id="cfg-profile-list" style="flex:1"></select>
+      <button id="cfg-load">Load</button>
+      <button id="cfg-save">Save</button>
+    </div>
+    <div style="display:flex; gap:6px; margin-bottom:8px;">
+      <input id="cfg-name" placeholder="profile name" style="flex:1"/>
+      <button id="cfg-del">Delete</button>
+      <button id="cfg-exp">Export</button>
+      <button id="cfg-imp">Import</button>
+    </div>
+    <div id="cfg-groups"></div>
+    <div style="opacity:.6; margin-top:10px;">[P] toggle · [1–9] quick load</div>
+  `;
+  document.body.appendChild(wrap);
+
+  // groups & sliders
+  const groupsHost = wrap.querySelector("#cfg-groups");
+  for (const [groupName, fields] of Object.entries(CONFIG_SCHEMA)) {
+    const g = document.createElement("details");
+    g.open = true;
+    const sum = document.createElement("summary");
+    sum.textContent = groupName;
+    sum.style.margin = "8px 0";
+    g.appendChild(sum);
+
+    for (const [path, meta] of Object.entries(fields)) {
+      const val = ConfigIO.get(path);
+      const row = document.createElement("div");
+      row.style.margin = "6px 0";
+      row.innerHTML = `
+        <label style="display:flex; gap:6px; align-items:center;">
+          <span style="flex:1">${meta.label}</span>
+          <input type="range" min="${meta.min}" max="${meta.max}" step="${meta.step}" value="${val}" data-path="${path}" style="flex:2">
+          <input type="number" step="${meta.step}" value="${val}" data-path="${path}" style="width:72px;">
+        </label>
+      `;
+      const [range, number] = row.querySelectorAll("input");
+      const sync = (v) => {
+        const num = Number(v);
+        range.value = num; number.value = num;
+        ConfigIO.set(path, num);
+        onConfigChanged();
+      };
+      range.addEventListener("input", e => sync(e.target.value));
+      number.addEventListener("change", e => sync(e.target.value));
+      g.appendChild(row);
+    }
+    groupsHost.appendChild(g);
+  }
+
+  // profiles
+  const sel = wrap.querySelector("#cfg-profile-list");
+  const name = wrap.querySelector("#cfg-name");
+  const refreshProfiles = () => {
+    sel.innerHTML = "";
+    const list = ConfigIO.loadProfiles();
+    list.forEach((p,i) => {
+      const opt = document.createElement("option");
+      opt.value = i; opt.textContent = p.name || `preset-${i+1}`;
+      sel.appendChild(opt);
+    });
+  };
+  refreshProfiles();
+
+  wrap.querySelector("#cfg-load").onclick = () => {
+    const idx = Number(sel.value); if (isNaN(idx)) return;
+    const list = ConfigIO.loadProfiles(); const p = list[idx];
+    if (p) { ConfigIO.apply(p.snapshot); name.value = p.name || ""; }
+  };
+  wrap.querySelector("#cfg-save").onclick = () => {
+    const snap = ConfigIO.snapshot();
+    const list = ConfigIO.loadProfiles();
+    const title = name.value?.trim() || `preset-${list.length+1}`;
+    // if same name exists, replace
+    const existing = list.findIndex(p => p.name === title);
+    if (existing >= 0) list[existing] = { name: title, snapshot: snap };
+    else list.push({ name: title, snapshot: snap });
+    ConfigIO.saveProfiles(list); refreshProfiles();
+  };
+  wrap.querySelector("#cfg-del").onclick = () => {
+    const idx = Number(sel.value); if (isNaN(idx)) return;
+    const list = ConfigIO.loadProfiles(); if (!list[idx]) return;
+    list.splice(idx,1); ConfigIO.saveProfiles(list); refreshProfiles();
+  };
+  wrap.querySelector("#cfg-exp").onclick = () => {
+    const snap = ConfigIO.snapshot();
+    const blob = new Blob([JSON.stringify(snap, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = Object.assign(document.createElement("a"), { href:url, download:"slime-config.json" });
+    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+  };
+  wrap.querySelector("#cfg-imp").onclick = async () => {
+    const input = document.createElement("input");
+    input.type = "file"; input.accept = "application/json";
+    input.onchange = async () => {
+      const file = input.files?.[0]; if (!file) return;
+      const text = await file.text();
+      try { const snap = JSON.parse(text); ConfigIO.apply(snap); }
+      catch { alert("Invalid JSON"); }
+    };
+    input.click();
+  };
+
+  wrap.querySelector("#cfg-close").onclick = () => togglePanel(false);
+}
+
+function togglePanel(force){
+  const el = document.getElementById("config-panel") || buildConfigPanel();
+  const node = document.getElementById("config-panel");
+  if (!node) return;
+  panelOpen = force ?? !panelOpen;
+  node.style.display = panelOpen ? "block" : "none";
+}
+
+// hotkeys
+window.addEventListener("keydown", (e) => {
+  if (e.code === "KeyP") { togglePanel(); e.preventDefault(); }
+  // quick-load profiles 1..9
+  if (/Digit[1-9]/.test(e.code)) {
+    const idx = Number(e.code.slice(-1)) - 1;
+    const list = ConfigIO.loadProfiles();
+    if (list[idx]) { ConfigIO.apply(list[idx].snapshot); }
+  }
+});
+
 
