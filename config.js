@@ -34,7 +34,7 @@ export const CONFIG = {
     enabled: true,                  // Use plant-based resource system
     
     // Fertility Grid (like trail grid, but for soil quality)
-    fertilityCell: 40,              // Size of fertility cells (pixels)
+    fertilityCell: 10,              // Size of fertility cells (pixels)
     
     // Initial conditions
     initialFertility: 0.8,          // Starting soil quality (0-1)
@@ -105,7 +105,7 @@ export const CONFIG = {
   trailCooldownTicks: 8,
   
   // === Own Trail Penalty (discourages circuit running) ===
-  ownTrailPenalty: 0.05,           // Chi cost per second for being on own fresh trail
+  ownTrailPenalty: 0.1,           // Chi cost per second for being on own fresh trail
   ownTrailGraceAge: 60,            // Ticks before own trail is "safe" to cross (0 = always penalize)
 
   // === Autonomy ===
@@ -165,7 +165,7 @@ export const CONFIG = {
     
     // Distance-based reward settings
     rewardEnabled: true,              // Give rewards for getting closer to food
-    rewardScale: 0.5,                 // Scaling factor for distance rewards (χ per pixel closer)
+    rewardScale: 0.75,                 // Scaling factor for distance rewards (χ per pixel closer)
     rewardUpdateInterval: 10,         // Check distance every N ticks (avoid per-frame noise)
     
     // Multi-scale density sensing
@@ -180,7 +180,7 @@ export const CONFIG = {
   mitosis: {
     enabled: true,                    // Enable mitosis system
     enabledDuringTraining: false,     // Disable during training (keep population fixed)
-    threshold: 30,                    // Minimum χ required to reproduce
+    threshold: 400,                    // Minimum χ required to reproduce
     cost: 15,                         // χ spent by parent on reproduction
     childStartChi: 12,                // Child's starting χ
     cooldown: 300,                    // Ticks between mitosis attempts (5 seconds at 60fps)
