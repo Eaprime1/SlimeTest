@@ -24,24 +24,24 @@ export const CONFIG = {
   
   // Resource scaling relative to living agents (INVERSE: more agents = less food)
   resourceScaleWithAgents: true,    // Scale max resources based on living agent count
-  resourceBaseAbundance: 30,        // Base resource abundance (when few agents)
-  resourceCompetition: 1.5,         // Resource reduction per agent (competition pressure)
-  resourceScaleMinimum: 4,          // Minimum resources even with many agents
-  resourceScaleMaximum: 60,         // Maximum resources (with very few agents)
+  resourceBaseAbundance: 15,        // Base resource abundance (when few agents)
+  resourceCompetition: 1.0,         // Resource reduction per agent (competition pressure)
+  resourceScaleMinimum: 3,          // Minimum resources even with many agents
+  resourceScaleMaximum: 20,         // Maximum resources (with very few agents)
   
   // === Plant Ecology System (soil fertility & clustering) ===
   plantEcology: {
     enabled: true,                  // Use plant-based resource system
     
     // Fertility Grid (like trail grid, but for soil quality)
-    fertilityCell: 10,              // Size of fertility cells (pixels)
+    fertilityCell: 40,              // Size of fertility cells (pixels)
     
     // Initial conditions
-    initialFertility: 0.5,          // Starting soil quality (0-1)
+    initialFertility: 0.8,          // Starting soil quality (0-1)
     fertilityVariation: 0.3,        // Random variation in initial fertility
     
     // Growth mechanics
-    seedChance: 0.02,               // Chance per second for resource to spawn seed
+    seedChance: 0.01,               // Chance per second for resource to spawn seed
     seedDistance: 120,              // Max distance for seed dispersal (pixels)
     growthFertilityThreshold: 0.3,  // Min fertility needed for growth
     growthChance: 0.1,             // Chance per second to grow in fertile soil
@@ -49,23 +49,23 @@ export const CONFIG = {
     // Resource clustering
     patchCount: 3,                  // Number of initial fertile patches
     patchRadius: 150,               // Radius of fertile patches (pixels)
-    patchFertility: 0.25,            // Fertility in patch centers
+    patchFertility: 0.9,            // Fertility in patch centers
     
     // Depletion & recovery
-    harvestDepletion: 0.9,         // Fertility lost per harvest (local)
+    harvestDepletion: 0.15,         // Fertility lost per harvest (local)
     harvestRadius: 60,              // Radius of depletion effect (pixels)
     fertilityRecovery: 0.05,        // Fertility gain per second (when not harvested)
     maxFertility: 1.0,              // Max fertility cap
     
     // Population pressure
     populationPressure: true,       // Enable population-based degradation
-    pressurePerAgent: 0.1,         // Global fertility drain per agent per second
+    pressurePerAgent: 0.01,         // Global fertility drain per agent per second
     pressureThreshold: 6,           // Agents above this cause pressure
 
     // Spawn pressure (reduce growth when population high)
     spawnPressure: {
       startAgents: 8,               // Agents before pressure kicks in
-      maxAgents: 50,                // Population where pressure is maxed
+      maxAgents: 24,                // Population where pressure is maxed
       minSeedMultiplier: 0.35,      // Minimum fraction of seed chance
       minGrowthMultiplier: 0.2,     // Minimum fraction of spontaneous growth chance
       minResourceMultiplier: 0.3    // Minimum fraction of resource abundance cap
@@ -92,7 +92,7 @@ export const CONFIG = {
   },
 
   // === Trail System ===
-  trailCell: 8,
+  trailCell: 6,
   depositPerSec: 2.5,
   evapPerSec: 0.015,
   diffusePerSec: 0.08,
@@ -105,7 +105,7 @@ export const CONFIG = {
   trailCooldownTicks: 8,
   
   // === Own Trail Penalty (discourages circuit running) ===
-  ownTrailPenalty: 0.5,           // Chi cost per second for being on own fresh trail
+  ownTrailPenalty: 0.05,           // Chi cost per second for being on own fresh trail
   ownTrailGraceAge: 60,            // Ticks before own trail is "safe" to cross (0 = always penalize)
 
   // === Autonomy ===
@@ -162,10 +162,11 @@ export const CONFIG = {
     maxRange: 400,                    // Maximum distance scent can be detected (pixels)
     falloffType: 'inverse-square',    // 'linear', 'inverse', 'inverse-square', 'exponential'
     strength: 1.0,                    // Base strength of scent at resource location
+    showSubtleIndicator: true,        // Show pulsating rings around resources
     
     // Distance-based reward settings
     rewardEnabled: true,              // Give rewards for getting closer to food
-    rewardScale: 0.75,                 // Scaling factor for distance rewards (χ per pixel closer)
+    rewardScale: 0.5,                 // Scaling factor for distance rewards (χ per pixel closer)
     rewardUpdateInterval: 10,         // Check distance every N ticks (avoid per-frame noise)
     
     // Multi-scale density sensing
@@ -238,7 +239,7 @@ export const CONFIG = {
       explore: 10.0,              // +R for unique trail coverage
       provenanceCredit: .5,        // +R when others reuse your trails
       death: -50.0,               // -R when χ reaches 0
-      gradientClimb: 5.0,         // +R per pixel moved closer to food (gradient climbing)
+      gradientClimb: 2.0,         // +R per pixel moved closer to food (gradient climbing)
     },
     
     // Episode settings

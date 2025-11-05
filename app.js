@@ -1054,6 +1054,27 @@ import { FertilityGrid, attemptSeedDispersal, attemptSpontaneousGrowth, getResou
           ctx.stroke();
           ctx.restore();
         }
+
+        // Subtle scent gradient indicator
+        if (CONFIG.scentGradient.enabled && CONFIG.scentGradient.showSubtleIndicator) {
+          const pulse = (Math.sin(globalTick * 0.05) + 1) / 2; // 0..1
+
+          ctx.save();
+          ctx.strokeStyle = `rgba(0, 255, 136, ${0.1 + pulse * 0.2})`;
+          ctx.lineWidth = 1;
+
+          // Ring 1
+          ctx.beginPath();
+          ctx.arc(this.x, this.y, this.r + 10 + pulse * 10, 0, Math.PI * 2);
+          ctx.stroke();
+
+          // Ring 2
+          ctx.beginPath();
+          ctx.arc(this.x, this.y, this.r + 30 + pulse * 20, 0, Math.PI * 2);
+          ctx.stroke();
+
+          ctx.restore();
+        }
       }
       
       respawn() {
@@ -1594,12 +1615,6 @@ import { FertilityGrid, attemptSeedDispersal, attemptSpontaneousGrowth, getResou
       }
       
       Trail.draw();
-      
-      // Draw scent gradient visualization if enabled
-      if (showScentGradient && CONFIG.scentGradient.enabled) {
-        visualizeScentHeatmap(ctx, World.resources, 40);
-        visualizeScentGradient(ctx, World.resources, 80);
-      }
       
       // Draw all resources
       World.resources.forEach(res => res.draw(ctx));
