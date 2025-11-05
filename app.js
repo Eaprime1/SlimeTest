@@ -1559,18 +1559,63 @@ import { FertilityGrid, attemptSeedDispersal, attemptSpontaneousGrowth, getResou
       ctx.restore();
     }
     
+    const agentPalette = [
+      { text: "#00ffff", frustration: "#ff5555" },
+      { text: "#ff00ff", frustration: "#ff55ff" },
+      { text: "#ffff00", frustration: "#ffff55" },
+      { text: "#ff8800", frustration: "#ff8855" }
+    ];
+
+    function renderAgentRow(ctx, bundle, index, options = {}) {
+      if (!bundle) return;
+
+      const {
+        palette = agentPalette,
+        textX = 10,
+        baseTextY = 18,
+        baseBarY = 22,
+        rowSpacing = 18,
+        barWidth = 60,
+        barHeight = 4,
+        hungerBarX = 73,
+        hungerColor = "#ff8800"
+      } = options;
+
+      const paletteEntry = palette[index] || { text: getAgentColor(bundle.id, bundle.alive), frustration: "#ff5555" };
+      const textY = baseTextY + index * rowSpacing;
+      const barY = baseBarY + index * rowSpacing;
+
+      const drawBar = (x, y, width, height, value, color) => {
+        ctx.save();
+        ctx.strokeStyle = "#444";
+        ctx.strokeRect(x, y, width, height);
+        ctx.fillStyle = color;
+        ctx.fillRect(x, y, width * clamp(value, 0, 1), height);
+        ctx.restore();
+      };
+
+      ctx.fillStyle = paletteEntry.text;
+      const controllerLabel = bundle.useController && bundle.controller
+        ? (index === 0 && loadedPolicyInfo
+          ? `🤖 ${loadedPolicyInfo.filename.replace('.json', '').substring(0, 12)}`
+          : (bundle.controller.constructor.name === "LinearPolicyController" ? "🤖 POLICY" : "🎮 CTRL"))
+        : "🧠 AI";
+      const visibilityIcon = bundle.visible ? "👁" : "🚫";
+      ctx.fillText(
+        `${visibilityIcon} A${bundle.id}[${index + 1}]: χ${bundle.chi.toFixed(1)} ${bundle.alive ? "✓" : "✗"} sense:${Math.round(bundle.currentSensoryRange)} ${controllerLabel} cr:${Ledger.getCredits(bundle.id).toFixed(1)}`,
+        textX,
+        textY
+      );
+
+      drawBar(textX, barY, barWidth, barHeight, bundle.frustration, paletteEntry.frustration);
+      drawBar(hungerBarX, barY, barWidth, barHeight, bundle.hunger, hungerColor);
+    }
+
     // ---------- HUD ----------
     function drawHUD() {
       if (!CONFIG.hud.show) return;
       ctx.save();
       ctx.font = "12px ui-mono, monospace";
-  
-      const bar = (x,y,w,h,f,color)=>{
-        ctx.save();
-        ctx.strokeStyle = "#444"; ctx.strokeRect(x,y,w,h);
-        ctx.fillStyle = color; ctx.fillRect(x,y, w*clamp(f,0,1), h);
-        ctx.restore();
-      };
 
       // HUD Header with bar legend
       ctx.fillStyle = "#888";
@@ -1578,80 +1623,35 @@ import { FertilityGrid, attemptSeedDispersal, attemptSpontaneousGrowth, getResou
       ctx.fillText("Frustration │ Hunger", 145, 12);
       ctx.font = "12px ui-mono, monospace";
 
-      // Agent 1
-      const b1 = World.bundles[0];
-      if (b1) {
-        ctx.fillStyle = "#00ffff";
-        let controller1 = b1.useController && b1.controller 
-          ? (loadedPolicyInfo ? `🤖 ${loadedPolicyInfo.filename.replace('.json', '').substring(0, 12)}` 
-                              : (b1.controller.constructor.name === "LinearPolicyController" ? "🤖 POLICY" : "🎮 CTRL"))
-          : "🧠 AI";
-        const vis1 = b1.visible ? "👁" : "🚫";
-        ctx.fillText(
-          `${vis1} A1[1]: χ${b1.chi.toFixed(1)} ${b1.alive ? "✓" : "✗"} sense:${Math.round(b1.currentSensoryRange)} ${controller1} cr:${Ledger.getCredits(1).toFixed(1)}`,
-          10, 18
-        );
-        bar(10, 22, 60, 4, b1.frustration, "#ff5555");
-        bar(73, 22, 60, 4, b1.hunger, "#ff8800");
-      }
+      const maxDisplay = agentPalette.length;
+      const options = {
+        palette: agentPalette,
+        textX: 10,
+        baseTextY: 18,
+        baseBarY: 22,
+        rowSpacing: 18,
+        barWidth: 60,
+        barHeight: 4,
+        hungerBarX: 73,
+        hungerColor: "#ff8800"
+      };
 
-      // Agent 2
-      const b2 = World.bundles[1];
-      if (b2) {
-        ctx.fillStyle = "#ff00ff";
-        const controller2 = b2.useController && b2.controller 
-          ? (b2.controller.constructor.name === "LinearPolicyController" ? "🤖 POLICY" : "🎮 CTRL")
-          : "🧠 AI";
-        const vis2 = b2.visible ? "👁" : "🚫";
-        ctx.fillText(
-          `${vis2} A2[2]: χ${b2.chi.toFixed(1)} ${b2.alive ? "✓" : "✗"} sense:${Math.round(b2.currentSensoryRange)} ${controller2} cr:${Ledger.getCredits(2).toFixed(1)}`,
-          10, 36
-        );
-        bar(10, 40, 60, 4, b2.frustration, "#ff55ff");
-        bar(73, 40, 60, 4, b2.hunger, "#ff8800");
-      }
+      const hasOverflow = World.bundles.length > maxDisplay;
 
-      // Agent 3
-      const b3 = World.bundles[2];
-      if (b3) {
-        ctx.fillStyle = "#ffff00";
-        const controller3 = b3.useController && b3.controller 
-          ? (b3.controller.constructor.name === "LinearPolicyController" ? "🤖 POLICY" : "🎮 CTRL")
-          : "🧠 AI";
-        const vis3 = b3.visible ? "👁" : "🚫";
-        ctx.fillText(
-          `${vis3} A3[3]: χ${b3.chi.toFixed(1)} ${b3.alive ? "✓" : "✗"} sense:${Math.round(b3.currentSensoryRange)} ${controller3} cr:${Ledger.getCredits(3).toFixed(1)}`,
-          10, 54
-        );
-        bar(10, 58, 60, 4, b3.frustration, "#ffff55");
-        bar(73, 58, 60, 4, b3.hunger, "#ff8800");
-      }
+      World.bundles.slice(0, maxDisplay).forEach((bundle, index) => {
+        renderAgentRow(ctx, bundle, index, options);
+      });
 
-      // Agent 4
-      const b4 = World.bundles[3];
-      if (b4) {
-        ctx.fillStyle = "#ff8800";
-        const controller4 = b4.useController && b4.controller 
-          ? (b4.controller.constructor.name === "LinearPolicyController" ? "🤖 POLICY" : "🎮 CTRL")
-          : "🧠 AI";
-        const vis4 = b4.visible ? "👁" : "🚫";
-        ctx.fillText(
-          `${vis4} A4[4]: χ${b4.chi.toFixed(1)} ${b4.alive ? "✓" : "✗"} sense:${Math.round(b4.currentSensoryRange)} ${controller4} cr:${Ledger.getCredits(4).toFixed(1)}`,
-          10, 72
-        );
-        bar(10, 76, 60, 4, b4.frustration, "#ff8855");
-        bar(73, 76, 60, 4, b4.hunger, "#ff8800");
-      }
-  
-      // Population summary (if more than 4 agents)
-      if (World.bundles.length > 4) {
+      // Population summary (if more than maxDisplay agents)
+      if (hasOverflow) {
         ctx.fillStyle = "#88ffff";
         const aliveCount = World.bundles.filter(b => b.alive).length;
         const totalChi = World.bundles.reduce((sum, b) => sum + b.chi, 0);
         const avgChi = totalChi / World.bundles.length;
-        ctx.fillText(`📊 Population: ${aliveCount}/${World.bundles.length} alive | Avg χ: ${avgChi.toFixed(1)} | Births: ${World.totalBirths}`, 10, 94);
+        const summaryY = options.baseBarY + maxDisplay * options.rowSpacing;
+        ctx.fillText(`📊 Population: ${aliveCount}/${World.bundles.length} alive | Avg χ: ${avgChi.toFixed(1)} | Births: ${World.totalBirths}`, 10, summaryY);
       }
-      
+
       // General info
       ctx.fillStyle = "#00ff88";
       const mode = CONFIG.autoMove ? "AUTO" : "MANUAL";
@@ -1685,31 +1685,31 @@ import { FertilityGrid, attemptSeedDispersal, attemptSpontaneousGrowth, getResou
         resourceInfo = `🌿 resources: ${World.resources.length}/${World.carryingCapacity} (pressure: ${(World.resourcePressure * 100).toFixed(0)}%)`;
       }
       
-      const yOffset = World.bundles.length > 4 ? 110 : 94;
+      const yOffset = hasOverflow ? 110 : 94;
       ctx.fillText(`${mode} | ${learningModeDisplay} | collected: ${World.collected} | ${resourceInfo} | tick: ${globalTick} | diffusion: ${diffState} | mitosis: ${mitosisStatus}`, 10, yOffset);
-      
+
       // Adaptive Reward Stats (if enabled)
       const scentStatus = showScentGradient ? "ON" : "OFF";
       const fertilityStatus = showFertility ? "ON" : "OFF";
       let controlsY1, controlsY2, controlsY3;
-      
+
       if (CONFIG.adaptiveReward?.enabled) {
         ctx.fillStyle = "#ffaa00";
         const nextReward = calculateAdaptiveReward(World.avgFindTime);
-        const adaptiveY = World.bundles.length > 4 ? 126 : 110;
+        const adaptiveY = hasOverflow ? 126 : 110;
         ctx.fillText(
           `Adaptive Reward: avgFind=${World.avgFindTime.toFixed(2)}s | nextReward≈${nextReward.toFixed(1)}χ | avgGiven=${World.rewardStats.avgRewardGiven.toFixed(1)}χ`,
           10, adaptiveY
         );
         ctx.fillStyle = "#00ff88";
-        controlsY1 = World.bundles.length > 4 ? 142 : 126;
-        controlsY2 = World.bundles.length > 4 ? 158 : 142;
-        controlsY3 = World.bundles.length > 4 ? 174 : 158;
+        controlsY1 = hasOverflow ? 142 : 126;
+        controlsY2 = hasOverflow ? 158 : 142;
+        controlsY3 = hasOverflow ? 174 : 158;
         ctx.fillText(`[WASD]=move [A]=auto [S]=extSense [G]=scent(${scentStatus}) [P]=fertility(${fertilityStatus}) [M]=mitosis(${mitosisStatus}) [Space]=pause [R]=reset [C]=+5χ`, 10, controlsY1);
         ctx.fillText(`[T]=trail [X]=clear [F]=diffuse [L]=train | [1-4]=toggle agent [V]=toggle all`, 10, controlsY2);
       } else {
-        controlsY1 = World.bundles.length > 4 ? 126 : 110;
-        controlsY2 = World.bundles.length > 4 ? 142 : 126;
+        controlsY1 = hasOverflow ? 126 : 110;
+        controlsY2 = hasOverflow ? 142 : 126;
         ctx.fillText(`[WASD]=move [A]=auto [S]=extSense [G]=scent(${scentStatus}) [P]=fertility(${fertilityStatus}) [M]=mitosis(${mitosisStatus}) [Space]=pause [R]=reset [C]=+5χ`, 10, controlsY1);
         ctx.fillText(`[T]=trail [X]=clear [F]=diffuse [L]=train | [1-4]=toggle agent [V]=toggle all`, 10, controlsY2);
       }
