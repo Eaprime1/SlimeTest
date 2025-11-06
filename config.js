@@ -304,6 +304,16 @@ export const CONFIG = {
   },
 };
 
+// --- Snapshots for panel resets ---
+let CURRENT_BASE_SNAPSHOT = null;        // last loaded/applied profile
+let BOOT_SNAPSHOT = null;                // factory defaults (boot-time read)
+
+function initSnapshotsOnce() {
+  if (!BOOT_SNAPSHOT) BOOT_SNAPSHOT = ConfigIO.snapshot();
+  if (!CURRENT_BASE_SNAPSHOT) CURRENT_BASE_SNAPSHOT = BOOT_SNAPSHOT;
+}
+
+
 export const CONFIG_SCHEMA = {
   Metabolism: {
     startChi: { label: "Start χ", min: 0, max: 200, step: 1 },
@@ -562,7 +572,10 @@ const ConfigIO = {
     for (const [path, val] of Object.entries(snapshot.params)) {
       if (CONFIG_SCHEMA && findPathInSchema(path)) this.set(path, val);
     }
+    CURRENT_BASE_SNAPSHOT = snapshot;   // <- becomes the new "revert to" base
     onConfigChanged();
+    refreshPanelControls();             // sync UI with applied values  
+    updateDirtyDot();                   // refresh dirty state
   },
   loadProfiles() {
     try { return JSON.parse(localStorage.getItem(PROFILES_KEY) || "[]"); }
@@ -572,6 +585,9 @@ const ConfigIO = {
     localStorage.setItem(PROFILES_KEY, JSON.stringify(list));
   }
 };
+
+// Initialize snapshots after ConfigIO is defined
+initSnapshotsOnce();
 
 function findPathInSchema(path){
   for (const group of Object.values(CONFIG_SCHEMA)) {
@@ -583,8 +599,53 @@ function findPathInSchema(path){
 function onConfigChanged() {
   // react to critical changes
   // If trailCell changed, resize trail grid:
-  if (Trail && Trail.cell !== CONFIG.trailCell) Trail.resize();
-  // You can add other “apply” hooks as needed.
+  if (typeof Trail !== 'undefined' && Trail && Trail.cell !== CONFIG.trailCell) Trail.resize();
+  // You can add other "apply" hooks as needed.
+}
+
+// ---- Panel helpers ----
+function panelEl() { return document.getElementById("config-panel"); }
+
+function refreshPanelControls() {
+  const root = panelEl();
+  if (!root) return;
+  root.querySelectorAll("[data-path]").forEach(inp => {
+    const p = inp.getAttribute("data-path");
+    const v = ConfigIO.get(p);
+    if (v !== undefined) {
+      if (inp.type === "checkbox") {
+        inp.checked = v;
+      } else if (inp.tagName === "SELECT") {
+        inp.value = v;
+      } else if (inp.type === "color") {
+        inp.value = v || "#000000";
+      } else {
+        inp.value = v;
+      }
+    }
+  });
+}
+
+function snapshotsEqual(a, b) {
+  if (!a || !b) return false;
+  const pa = a.params, pb = b.params;
+  for (const k of Object.keys(CONFIG_SCHEMA).flatMap(g => Object.keys(CONFIG_SCHEMA[g]))) {
+    if (pa[k] !== pb[k]) return false;
+  }
+  return true;
+}
+
+function currentVsBaseSnapshot() {
+  const cur = ConfigIO.snapshot();
+  const base = CURRENT_BASE_SNAPSHOT || BOOT_SNAPSHOT;
+  return { cur, base };
+}
+
+function updateDirtyDot() {
+  const dot = document.getElementById("cfg-dirty");
+  if (!dot) return;
+  const { cur, base } = currentVsBaseSnapshot();
+  dot.style.display = snapshotsEqual(cur, base) ? "none" : "inline";
 }
 
 // ---- UI builder ----
@@ -601,10 +662,14 @@ function buildConfigPanel(){
     display: "none"
   });
   wrap.innerHTML = `
-    <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
-      <strong style="font-size:13px;">Slime Config</strong>
-      <button id="cfg-close" style="margin-left:auto;">✕</button>
-    </div>
+  <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+    <strong style="font-size:13px;">Slime Config</strong>
+    <span id="cfg-dirty" title="Modified from loaded profile" style="color:#ffd166; display:none; margin-left:4px;">●</span>
+    <button id="cfg-revert"  title="Reset sliders to last loaded profile">Revert</button>
+    <button id="cfg-default" title="Reset sliders to boot-time defaults">Defaults</button>
+    <button id="cfg-collapse" title="Collapse all sections">Collapse All</button>
+    <button id="cfg-close" style="margin-left:auto;">✕</button>
+  </div>
     <div id="cfg-profiles" style="display:flex; gap:6px; margin-bottom:8px;">
       <select id="cfg-profile-list" style="flex:1"></select>
       <button id="cfg-load">Load</button>
@@ -635,22 +700,76 @@ function buildConfigPanel(){
       const val = ConfigIO.get(path);
       const row = document.createElement("div");
       row.style.margin = "6px 0";
-      row.innerHTML = `
-        <label style="display:flex; gap:6px; align-items:center;">
-          <span style="flex:1">${meta.label}</span>
-          <input type="range" min="${meta.min}" max="${meta.max}" step="${meta.step}" value="${val}" data-path="${path}" style="flex:2">
-          <input type="number" step="${meta.step}" value="${val}" data-path="${path}" style="width:72px;">
-        </label>
-      `;
-      const [range, number] = row.querySelectorAll("input");
-      const sync = (v) => {
-        const num = Number(v);
-        range.value = num; number.value = num;
-        ConfigIO.set(path, num);
-        onConfigChanged();
-      };
-      range.addEventListener("input", e => sync(e.target.value));
-      number.addEventListener("change", e => sync(e.target.value));
+      
+      if (meta.type === "boolean") {
+        // Checkbox for boolean
+        row.innerHTML = `
+          <label style="display:flex; gap:6px; align-items:center;">
+            <span style="flex:1">${meta.label}</span>
+            <input type="checkbox" ${val ? "checked" : ""} data-path="${path}">
+          </label>
+        `;
+        const checkbox = row.querySelector("input");
+        checkbox.addEventListener("change", (e) => {
+          ConfigIO.set(path, e.target.checked);
+          onConfigChanged();
+          updateDirtyDot();
+        });
+      } else if (meta.type === "color") {
+        // Color picker for color
+        row.innerHTML = `
+          <label style="display:flex; gap:6px; align-items:center;">
+            <span style="flex:1">${meta.label}</span>
+            <input type="color" value="${val || "#000000"}" data-path="${path}" style="width:72px;">
+          </label>
+        `;
+        const color = row.querySelector("input");
+        color.addEventListener("change", (e) => {
+          ConfigIO.set(path, e.target.value);
+          onConfigChanged();
+          updateDirtyDot();
+        });
+      } else if (meta.type === "options") {
+        // Select dropdown for options
+        const options = meta.options.map(opt => `<option value="${opt}" ${val === opt ? "selected" : ""}>${opt}</option>`).join("");
+        row.innerHTML = `
+          <label style="display:flex; gap:6px; align-items:center;">
+            <span style="flex:1">${meta.label}</span>
+            <select data-path="${path}" style="flex:2">
+              ${options}
+            </select>
+          </label>
+        `;
+        const select = row.querySelector("select");
+        select.addEventListener("change", (e) => {
+          ConfigIO.set(path, e.target.value);
+          onConfigChanged();
+          updateDirtyDot();
+        });
+      } else {
+        // Range + number for numeric inputs
+        row.innerHTML = `
+          <label style="display:flex; gap:6px; align-items:center;">
+            <span style="flex:1">${meta.label}</span>
+            <input type="range" min="${meta.min}" max="${meta.max}" step="${meta.step}" value="${val}" data-path="${path}" style="flex:2">
+            <input type="number" min="${meta.min}" max="${meta.max}" step="${meta.step}" value="${val}" data-path="${path}" style="width:72px;">
+          </label>
+        `;
+        const [range, number] = row.querySelectorAll("input");
+        const sync = (v) => {
+          const num = Number(v);
+          range.value = num;
+          number.value = num;
+          ConfigIO.set(path, num);
+          onConfigChanged();
+          updateDirtyDot();
+        };
+        range.addEventListener("input", e => sync(e.target.value));
+        number.addEventListener("change", e => sync(e.target.value));
+        // Sync when number input changes (for typing)
+        number.addEventListener("input", e => sync(e.target.value));
+      }
+      
       g.appendChild(row);
     }
     groupsHost.appendChild(g);
@@ -673,7 +792,7 @@ function buildConfigPanel(){
   wrap.querySelector("#cfg-load").onclick = () => {
     const idx = Number(sel.value); if (isNaN(idx)) return;
     const list = ConfigIO.loadProfiles(); const p = list[idx];
-    if (p) { ConfigIO.apply(p.snapshot); name.value = p.name || ""; }
+    if (p) { ConfigIO.apply(p.snapshot); name.value = p.name || ""; updateDirtyDot(); }
   };
   wrap.querySelector("#cfg-save").onclick = () => {
     const snap = ConfigIO.snapshot();
@@ -684,6 +803,8 @@ function buildConfigPanel(){
     if (existing >= 0) list[existing] = { name: title, snapshot: snap };
     else list.push({ name: title, snapshot: snap });
     ConfigIO.saveProfiles(list); refreshProfiles();
+    CURRENT_BASE_SNAPSHOT = snap; // saving makes current state the new base
+    updateDirtyDot();
   };
   wrap.querySelector("#cfg-del").onclick = () => {
     const idx = Number(sel.value); if (isNaN(idx)) return;
@@ -703,11 +824,48 @@ function buildConfigPanel(){
     input.onchange = async () => {
       const file = input.files?.[0]; if (!file) return;
       const text = await file.text();
-      try { const snap = JSON.parse(text); ConfigIO.apply(snap); }
+      try { const snap = JSON.parse(text); ConfigIO.apply(snap); updateDirtyDot(); }
       catch { alert("Invalid JSON"); }
     };
     input.click();
   };
+
+  // Wire up Revert and Defaults buttons
+  const revertBtn = wrap.querySelector("#cfg-revert");
+  if (revertBtn) {
+    revertBtn.onclick = () => {
+      // Ensure snapshots are initialized
+      if (!BOOT_SNAPSHOT) initSnapshotsOnce();
+      if (!CURRENT_BASE_SNAPSHOT) CURRENT_BASE_SNAPSHOT = BOOT_SNAPSHOT;
+      if (CURRENT_BASE_SNAPSHOT) {
+        ConfigIO.apply(CURRENT_BASE_SNAPSHOT);
+      }
+    };
+  }
+
+  const defaultBtn = wrap.querySelector("#cfg-default");
+  if (defaultBtn) {
+    defaultBtn.onclick = () => {
+      // Ensure snapshots are initialized
+      if (!BOOT_SNAPSHOT) initSnapshotsOnce();
+      if (BOOT_SNAPSHOT) {
+        ConfigIO.apply(BOOT_SNAPSHOT);
+      }
+    };
+  }
+
+  // Wire up Collapse All button
+  const collapseBtn = wrap.querySelector("#cfg-collapse");
+  if (collapseBtn) {
+    collapseBtn.onclick = () => {
+      const groupsHost = wrap.querySelector("#cfg-groups");
+      if (groupsHost) {
+        groupsHost.querySelectorAll("details").forEach(details => {
+          details.open = false;
+        });
+      }
+    };
+  }
 
   wrap.querySelector("#cfg-close").onclick = () => togglePanel(false);
 }
@@ -728,6 +886,11 @@ window.addEventListener("keydown", (e) => {
     const idx = Number(e.code.slice(-1)) - 1;
     const list = ConfigIO.loadProfiles();
     if (list[idx]) { ConfigIO.apply(list[idx].snapshot); }
+  }
+  // Ctrl/Cmd+U: revert
+  if (e.code === "KeyU" && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault();
+    if (CURRENT_BASE_SNAPSHOT) ConfigIO.apply(CURRENT_BASE_SNAPSHOT);
   }
 });
 
