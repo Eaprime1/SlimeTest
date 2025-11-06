@@ -2,7 +2,7 @@
 // Controls: [WASD/Arrows]=move (Agent 1 when MANUAL) | [A]=auto toggle | [S]=toggle extended sensing
 // [G]=scent gradient viz | [P]=fertility viz | [M]=mitosis toggle | [Space]=pause [R]=reset [C]=+5χ all 
 // [T]=trail on/off [X]=clear trail [F]=diffusion on/off | [1-4]=toggle individual agents | [V]=toggle all | [L]=training UI
-// [H]=agent dashboard | [U]=cycle HUD (full/minimal/hidden)
+// [H]=agent dashboard | [U]=cycle HUD (full/minimal/hidden) | [K]=toggle hotkey strip | [O]=config panel
 
 import { CONFIG } from './config.js';
 import { HeuristicController, LinearPolicyController } from './controllers.js';
@@ -81,12 +81,27 @@ import { FertilityGrid, attemptSeedDispersal, attemptSpontaneousGrowth, getResou
     let showScentGradient = true; // Toggle for scent gradient visualization
     let showFertility = false; // Toggle for fertility grid visualization
     let hudDisplayMode = 'full'; // 'full', 'minimal', or 'hidden'
+    let showHotkeyStrip = true; // Toggle for hotkey strip at bottom
     
     window.addEventListener("keydown", (e) => {
       const k = e.key.toLowerCase();
       if (["arrowup","w","arrowdown","s","arrowleft","a","arrowright","d"].includes(k)) held.add(k);
       if (e.code === "Space") { World.paused = !World.paused; e.preventDefault(); }
       else if (e.code === "KeyR") { World.reset(); }
+      else if (e.code === "KeyK") { 
+        // Toggle hotkey strip
+        showHotkeyStrip = !showHotkeyStrip;
+        const hotkeyStrip = document.getElementById("hotkey-strip");
+        if (hotkeyStrip) {
+          if (showHotkeyStrip) {
+            hotkeyStrip.classList.remove("hidden");
+          } else {
+            hotkeyStrip.classList.add("hidden");
+          }
+        }
+        console.log(`⌨️  Hotkey strip ${showHotkeyStrip ? "VISIBLE" : "HIDDEN"}`);
+        e.preventDefault();
+      }
       else if (e.code === "KeyC") { 
         World.bundles.forEach(b => { 
           b.chi += 5; 
@@ -1655,19 +1670,43 @@ import { FertilityGrid, attemptSeedDispersal, attemptSpontaneousGrowth, getResou
       if (!CONFIG.hud.show || hudDisplayMode === 'hidden') return;
       ctx.save();
       
-      const baselineY = 10; // Common baseline for HUD and Dashboard
-      const padding = 12;
-      const lineHeight = 15; // Slightly increased for better readability
-      const sectionSpacing = 8; // Increased spacing
+      const baselineY = 10;
+      const padding = 14;
+      const lineHeight = 16;
+      const sectionSpacing = 10;
       
-      // Build HUD content first to calculate dimensions
-      const mode = CONFIG.autoMove ? "AUTO" : "MANUAL";
-      const diffState = CONFIG.enableDiffusion ? "ON" : "OFF";
-      const learningModeDisplay = learningMode === 'train' ? "TRAINING" : "PLAY";
-      const mitosisStatus = CONFIG.mitosis.enabled ? "ON" : "OFF";
-      const scentStatus = showScentGradient ? "ON" : "OFF";
-      const fertilityStatus = showFertility ? "ON" : "OFF";
-
+      // Helper function to draw status badge (horizontal layout)
+      const drawBadge = (x, y, enabled, label) => {
+        const badgeWidth = 80; // Fixed width for alignment
+        const badgeHeight = 16;
+        
+        // Badge background
+        ctx.fillStyle = enabled 
+          ? "rgba(0, 255, 136, 0.2)" 
+          : "rgba(128, 128, 128, 0.15)";
+        ctx.fillRect(x, y - 11, badgeWidth, badgeHeight);
+        
+        // Badge border
+        ctx.strokeStyle = enabled 
+          ? "rgba(0, 255, 136, 0.5)" 
+          : "rgba(128, 128, 128, 0.3)";
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x, y - 11, badgeWidth, badgeHeight);
+        
+        // Check mark or cross
+        ctx.fillStyle = enabled ? "#4dffaa" : "#666";
+        ctx.font = "bold 11px ui-mono, monospace";
+        ctx.fillText(enabled ? "✓" : "✗", x + 4, y);
+        
+        // Label
+        ctx.fillStyle = enabled ? "#00ff88" : "#888";
+        ctx.font = "12px ui-mono, monospace";
+        ctx.fillText(label, x + 18, y);
+        
+        return y + badgeHeight + 3; // Return next Y position
+      };
+      
+      // Calculate metrics
       const totalAgents = World.bundles.length;
       const aliveCount = World.bundles.filter(b => b.alive).length;
       const totalChi = World.bundles.reduce((sum, b) => sum + b.chi, 0);
@@ -1695,10 +1734,10 @@ import { FertilityGrid, attemptSeedDispersal, attemptSpontaneousGrowth, getResou
           );
           const pressurePct = Math.round((1 - pressureMultiplier) * 100);
           resourceSummary = `${World.resources.length}/${maxResources}`;
-          resourceDetails = `agents ${aliveCount} | pressure ${pressurePct}%`;
+          resourceDetails = `pressure ${pressurePct}%`;
         } else {
           resourceSummary = `${World.resources.length}/${World.carryingCapacity}`;
-          resourceDetails = `plants ${World.carryingCapacity}`;
+          resourceDetails = `cap ${World.carryingCapacity}`;
         }
       } else if (CONFIG.resourceDynamicCount) {
         resourceSummary = `${World.resources.length}/${World.carryingCapacity}`;
@@ -1707,105 +1746,151 @@ import { FertilityGrid, attemptSeedDispersal, attemptSpontaneousGrowth, getResou
 
       const hudSections = [];
 
-      // Minimal mode: only show agent count and basic info
+      // Minimal mode: compact single line
       if (hudDisplayMode === 'minimal') {
         hudSections.push({
           color: "#88ffff",
           lines: [
-            `📊 ${aliveCount}/${totalAgents}  χ:${avgChi.toFixed(1)}  births:${World.totalBirths}  tick:${globalTick}  [U]=HUD`
+            `📊 ${aliveCount}/${totalAgents}  χ:${avgChi.toFixed(1)}  🌿:${resourceSummary}  tick:${globalTick}`
           ]
         });
       } else {
-        // Full mode: show all info
+        // Full mode: organized sections
+        
+        // Section 1: Agent Statistics
         hudSections.push({
           color: "#88ffff",
           lines: [
-            `📊 agents ${aliveCount}/${totalAgents}`,
-            `${"avg χ".padEnd(12)}${avgChi.toFixed(1)}   ${"births".padEnd(12)}${World.totalBirths}`,
-            `${"avg F/H".padEnd(12)}${Math.round(avgFrustration * 100)}% / ${Math.round(avgHunger * 100)}%`
+            `📊 AGENTS`,
+            `   alive:   ${aliveCount}/${totalAgents}`,
+            `   avg χ:   ${avgChi.toFixed(1)}`,
+            `   births:  ${World.totalBirths}`,
+            `   avg F/H: ${Math.round(avgFrustration * 100)}% / ${Math.round(avgHunger * 100)}%`
           ]
         });
 
-        const generalLines = [
-          `${"mode".padEnd(12)}${mode.padEnd(8)}${"learning".padEnd(12)}${learningModeDisplay.padEnd(9)}`,
-          `${"tick".padEnd(12)}${globalTick.toString().padEnd(8)}${"χ earned".padEnd(12)}${World.collected.toString().padEnd(8)}`,
-          `${"diffusion".padEnd(12)}${diffState.padEnd(4)}${"mitosis".padEnd(12)}${mitosisStatus.padEnd(4)}`,
-          `${"🌿 resources".padEnd(14)}${resourceSummary}`
+        // Section 2: Simulation Stats
+        const simLines = [
+          `⚙️  SIMULATION`,
+          `   mode:      ${CONFIG.autoMove ? "AUTO" : "MANUAL"}`,
+          `   learning:  ${learningMode === 'train' ? "TRAINING" : "PLAY"}`,
+          `   tick:      ${globalTick}`,
+          `   χ earned:  ${World.collected}`
         ];
-        if (resourceDetails) {
-          generalLines.push(`${"".padEnd(14)}${resourceDetails}`);
-        }
-
         hudSections.push({
           color: "#00ff88",
-          lines: generalLines
+          lines: simLines
         });
 
-        if (CONFIG.adaptiveReward?.enabled) {
-          const nextReward = calculateAdaptiveReward(World.avgFindTime);
-          hudSections.push({
-            color: "#ffaa00",
-            lines: [
-              `${"avg find".padEnd(12)}${World.avgFindTime.toFixed(2)}s`,
-              `${"next χ".padEnd(12)}≈${nextReward.toFixed(1)}   ${"avg given".padEnd(12)}${World.rewardStats.avgRewardGiven.toFixed(1)}χ`
-            ]
-          });
-        }
-
-        const controlsLines = [
-          `[Space] pause   [R] reset   [C] +5χ`,
-          `[A] auto   [S] extSense   [G] scent(${scentStatus})   [P] fertility(${fertilityStatus})`,
-          `[M] mitosis(${mitosisStatus})   [T] trail   [X] clear   [F] diffuse   [L] train`,
-          `[H] agents(${showAgentDashboard ? "ON" : "OFF"})   [1-4] agent vis   [V] toggle all   [U] HUD`
+        // Section 3: Resources
+        const resourceLines = [
+          `🌿 RESOURCES`,
+          `   count:  ${resourceSummary}`
         ];
-
+        if (resourceDetails) {
+          resourceLines.push(`   ${resourceDetails}`);
+        }
         hudSections.push({
-          color: "#00ff88",
-          lines: controlsLines
+          color: "#ffaa00",
+          lines: resourceLines
+        });
+
+        // Section 4: Status badges (visual checkmarks) - vertical layout
+        hudSections.push({
+          type: 'badges',
+          color: "#88ddff",
+          label: "⚡ STATUS",
+          badges: [
+            { label: 'Trail', enabled: CONFIG.renderTrail },
+            { label: 'Diffusion', enabled: CONFIG.enableDiffusion },
+            { label: 'Mitosis', enabled: CONFIG.mitosis.enabled },
+            { label: 'Scent', enabled: showScentGradient },
+            { label: 'Fertility', enabled: showFertility },
+            { label: 'Dashboard', enabled: showAgentDashboard }
+          ]
         });
       }
 
-      // Calculate HUD height
+      // Calculate HUD dimensions
       let totalLines = 0;
+      let badgeCount = 0;
       hudSections.forEach(section => {
-        totalLines += section.lines.length;
+        if (section.type === 'badges') {
+          totalLines += 1; // Header line
+          badgeCount = section.badges.length;
+        } else {
+          totalLines += section.lines.length;
+        }
       });
-      const hudHeight = padding * 2 + totalLines * lineHeight + (hudSections.length - 1) * sectionSpacing;
-      const hudWidth = hudDisplayMode === 'minimal' ? 480 : 500; // Smaller width for minimal mode
+      
+      // Add space for vertical badges (each badge is ~19px including spacing)
+      const badgeVerticalSpace = badgeCount * 19;
+      const hudHeight = padding * 2 + totalLines * lineHeight + (hudSections.length - 1) * sectionSpacing + badgeVerticalSpace;
+      const hudWidth = hudDisplayMode === 'minimal' ? 500 : 175;
 
-      // Draw HUD background with higher opacity
+      // Draw HUD background
       ctx.fillStyle = "rgba(0, 0, 0, 0.85)";
       ctx.fillRect(baselineY, baselineY, hudWidth, hudHeight);
-      ctx.strokeStyle = "rgba(0, 255, 136, 0.6)";
+      ctx.strokeStyle = "rgba(0, 255, 136, 0.5)";
+      ctx.lineWidth = 1;
       ctx.strokeRect(baselineY, baselineY, hudWidth, hudHeight);
 
-      // Draw HUD text with improved readability
-      ctx.font = "13px ui-mono, monospace"; // Slightly larger font
+      // Draw HUD content
+      ctx.font = "13px ui-mono, monospace";
       ctx.textAlign = "left";
       
-      const writeHudLines = (section, startY) => {
-        const lines = section.lines.filter(Boolean);
-        if (!lines.length) return startY;
-        let y = startY;
-        ctx.fillStyle = section.color;
-        lines.forEach(line => {
-          // Add text shadow for better readability
+      let currentY = baselineY + padding + 13;
+      
+      hudSections.forEach(section => {
+        if (section.type === 'badges') {
+          // Draw status badges section header
+          ctx.fillStyle = section.color;
+          ctx.font = "bold 13px ui-mono, monospace";
           ctx.shadowColor = "rgba(0, 0, 0, 0.8)";
           ctx.shadowBlur = 2;
           ctx.shadowOffsetX = 1;
           ctx.shadowOffsetY = 1;
-          ctx.fillText(line, baselineY + padding, y);
+          ctx.fillText(section.label, baselineY + padding, currentY);
           ctx.shadowBlur = 0;
           ctx.shadowOffsetX = 0;
           ctx.shadowOffsetY = 0;
-          y += lineHeight;
-        });
-        return y + sectionSpacing;
-      };
-
-      let currentY = baselineY + padding + lineHeight;
-      hudSections.forEach(section => {
-        currentY = writeHudLines(section, currentY);
+          
+          currentY += lineHeight + 3;
+          
+          // Draw status badges vertically
+          const badgeX = baselineY + padding + 3;
+          section.badges.forEach(badge => {
+            currentY = drawBadge(badgeX, currentY, badge.enabled, badge.label);
+          });
+          currentY += sectionSpacing;
+        } else {
+          // Draw text lines
+          const lines = section.lines.filter(Boolean);
+          ctx.fillStyle = section.color;
+          lines.forEach((line, idx) => {
+            // Add subtle shadow for readability
+            ctx.shadowColor = "rgba(0, 0, 0, 0.8)";
+            ctx.shadowBlur = 2;
+            ctx.shadowOffsetX = 1;
+            ctx.shadowOffsetY = 1;
+            
+            // Make section headers bold
+            if (idx === 0) {
+              ctx.font = "bold 13px ui-mono, monospace";
+            } else {
+              ctx.font = "12px ui-mono, monospace";
+            }
+            
+            ctx.fillText(line, baselineY + padding, currentY);
+            
+            ctx.shadowBlur = 0;
+            ctx.shadowOffsetX = 0;
+            ctx.shadowOffsetY = 0;
+            
+            currentY += lineHeight;
+          });
+          currentY += sectionSpacing;
+        }
       });
 
       if (showAgentDashboard) {

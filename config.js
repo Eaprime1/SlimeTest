@@ -995,10 +995,19 @@ function buildConfigPanel(){
       }
 
       if (hint) {
-        row.title = hint;
-        row.querySelectorAll("label, span, input, select").forEach(el => {
-          el.title = hint;
-        });
+        // Apply tooltip to all interactive elements
+        row.setAttribute("title", hint);
+        const label = row.querySelector("label");
+        if (label) label.setAttribute("title", hint);
+        row.querySelectorAll("span").forEach(el => el.setAttribute("title", hint));
+        row.querySelectorAll("input").forEach(el => el.setAttribute("title", hint));
+        row.querySelectorAll("select").forEach(el => el.setAttribute("title", hint));
+        
+        // Add visual indicator that tooltip exists
+        const labelSpan = row.querySelector("span");
+        if (labelSpan && !labelSpan.querySelector(".hint-indicator")) {
+          labelSpan.innerHTML += ' <span class="hint-indicator" style="color:#888; font-size:10px; cursor:help;" title="' + hint + '">ⓘ</span>';
+        }
       }
 
       g.appendChild(row);
