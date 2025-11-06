@@ -14,6 +14,7 @@ import { TrainingUI } from './trainingUI.js';
 import { visualizeScentGradient, visualizeScentHeatmap } from './scentGradient.js';
 import { FertilityGrid, attemptSeedDispersal, attemptSpontaneousGrowth, getResourceSpawnLocation, getSpawnPressureMultiplier } from './plantEcology.js';
 import { SignalResponseAnalytics } from './analysis/signalResponseAnalytics.js';
+import { TcScheduler, TcRandom, TcStorage } from './tcStorage.js';
 
 (() => {
     const canvas = document.getElementById("view");
@@ -185,7 +186,7 @@ import { SignalResponseAnalytics } from './analysis/signalResponseAnalytics.js';
       return clamp(rewardChi / base, 0, 1);
     };
     const mix = (a,b,t)=>a+(b-a)*t;
-    const randomRange = (min, max) => Math.random() * (max - min) + min;
+    const randomRange = (min, max) => TcRandom.random() * (max - min) + min;
     const smoothstep = (e0,e1,x)=> {
       const t = clamp((x - e0) / Math.max(1e-6, e1 - e0), 0, 1);
       return t * t * (3 - 2 * t);
@@ -844,8 +845,8 @@ import { SignalResponseAnalytics } from './analysis/signalResponseAnalytics.js';
         }
         const baseNoise = (CONFIG.aiExploreNoiseBase + CONFIG.aiExploreNoiseGain * f) * hungerAmp * bereaveMul;
         const noise = baseNoise * distressMul;
-        dx += (Math.random() - 0.5) * noise * (resourceVisible ? 1.0 : 1.8);
-        dy += (Math.random() - 0.5) * noise * (resourceVisible ? 1.0 : 1.8);
+        dx += (TcRandom.random() - 0.5) * noise * (resourceVisible ? 1.0 : 1.8);
+        dy += (TcRandom.random() - 0.5) * noise * (resourceVisible ? 1.0 : 1.8);
   
         // normalize
         const mag = Math.hypot(dx, dy);
@@ -1459,8 +1460,8 @@ import { SignalResponseAnalytics } from './analysis/signalResponseAnalytics.js';
         this.chi -= CONFIG.mitosis.cost;
 
         const angle = CONFIG.mitosis.inheritHeading
-          ? this.heading + (Math.random() - 0.5) * CONFIG.mitosis.headingNoise
-          : Math.random() * Math.PI * 2;
+          ? this.heading + (TcRandom.random() - 0.5) * CONFIG.mitosis.headingNoise
+          : TcRandom.random() * Math.PI * 2;
 
         const offset = CONFIG.mitosis.spawnOffset;
         const half = this.size / 2;
@@ -1498,7 +1499,7 @@ import { SignalResponseAnalytics } from './analysis/signalResponseAnalytics.js';
 
         const angle = CONFIG.mitosis.inheritHeading
           ? this.heading
-          : Math.random() * Math.PI * 2;
+          : TcRandom.random() * Math.PI * 2;
 
         const child = this.spawnChild(childX, childY, childChi, angle, "Budding");
 
@@ -1635,8 +1636,8 @@ import { SignalResponseAnalytics } from './analysis/signalResponseAnalytics.js';
         } else {
           // Fallback: random spawn
           const margin = 60;
-          this.x = margin + Math.random() * (innerWidth  - 2*margin);
-          this.y = margin + Math.random() * (innerHeight - 2*margin);
+          this.x = margin + TcRandom.random() * (innerWidth  - 2*margin);
+          this.y = margin + TcRandom.random() * (innerHeight - 2*margin);
         }
         
         this.age = 0;
@@ -1706,6 +1707,8 @@ import { SignalResponseAnalytics } from './analysis/signalResponseAnalytics.js';
         Trail.clear();
         SignalField.clear();
         SignalResponseAnalytics.reset();
+        TcStorage.clear();
+        TcScheduler.reset();
         globalTick = 0;
         Ledger.credits = {};
         // Clear all links on reset
@@ -1745,7 +1748,7 @@ import { SignalResponseAnalytics } from './analysis/signalResponseAnalytics.js';
             // Legacy: start with abundant resources, will decline to stable level
             initialCount = Math.floor(
               CONFIG.resourceInitialMin + 
-              Math.random() * (CONFIG.resourceInitialMax - CONFIG.resourceInitialMin + 1)
+              TcRandom.random() * (CONFIG.resourceInitialMax - CONFIG.resourceInitialMin + 1)
             );
           }
           
@@ -1856,7 +1859,7 @@ import { SignalResponseAnalytics } from './analysis/signalResponseAnalytics.js';
         if (this.resources.length < CONFIG.resourceStableMax && 
             this.resources.length < this.carryingCapacity) {
           const spawnChance = CONFIG.resourceRecoveryChance * dt;
-          if (Math.random() < spawnChance) {
+          if (TcRandom.random() < spawnChance) {
             const cx = canvasWidth / 2, cy = canvasHeight / 2;
             const res = new Resource(cx, cy, CONFIG.resourceRadius);
             res.respawn();
@@ -2356,80 +2359,92 @@ import { SignalResponseAnalytics } from './analysis/signalResponseAnalytics.js';
       last = now;
   
       if (!World.paused) {
+        const tcEnabled = TcScheduler.getConfig().enabled;
+        const beginTick = tcEnabled ? TcScheduler.beginTick({
+          tick: globalTick,
+          dt,
+          mode: learningMode,
+          scheduler: 'play',
+          world: World
+        }) : null;
+        let tickContext = beginTick;
         try {
           Trail.captureSnapshot(); // fair residuals (prev frame)
           if (CONFIG.signal.enabled) {
             SignalField.captureSnapshot();
           }
+          if (tcEnabled) TcScheduler.runPhase('capture', tickContext);
 
-        // Link formation pass (cheap local heuristic)
-        for (let i = 0; i < World.bundles.length; i++) {
-          for (let j = i + 1; j < World.bundles.length; j++) {
-            const a = World.bundles[i];
-            const b = World.bundles[j];
-            if (!a.alive || !b.alive) continue;
-            tryFormLink(a, b);
-          }
-        }
-
-        // Update each bundle with nearest resource
-        World.bundles.forEach(b => {
-          const nearestResource = World.getNearestResource(b);
-          b.update(dt, nearestResource);
-        });
-        
-        // Link maintenance & decay, use-based strengthening
-        maintainLinks(dt);
-
-        Trail.step(dt);
-        if (CONFIG.signal.enabled) {
-          SignalField.step(dt);
-        }
-
-        // Trail reinforcement along active links
-        reinforceLinks(dt);
-
-        // Update resource ecology (carrying capacity dynamics)
-        World.updateEcology(dt);
-
-        // Consumable scent gradient: orbiting erodes, absence recovers
-        if (CONFIG.scentGradient.consumable) {
-          const orbitBand = CONFIG.scentGradient.orbitBandPx;
-          const minStrength = CONFIG.scentGradient.minStrength;
-          const minRange = CONFIG.scentGradient.minRange;
-          const baseStrength = CONFIG.scentGradient.strength;
-          const baseRange = CONFIG.scentGradient.maxRange;
-          const consumeRate = CONFIG.scentGradient.consumePerSec * dt;
-          const recoverRate = CONFIG.scentGradient.recoverPerSec * dt;
-
-          for (const res of World.resources) {
-            if (!res.visible) continue;
-            // Find nearest alive agent distance
-            let nearest = Infinity;
-            for (const b of World.bundles) {
-              if (!b.alive) continue;
-              const d = Math.hypot(res.x - b.x, res.y - b.y);
-              if (d < nearest) nearest = d;
-            }
-            // Inside orbit band (outside core radius)
-            const inner = res.r;
-            const outer = res.r + orbitBand;
-            if (nearest > inner && nearest <= outer) {
-              const t = 1 - (nearest - inner) / Math.max(1e-6, outer - inner); // 0..1 closer => bigger
-              const use = t * t; // quadratic for stronger close-in consumption
-              res.scentStrength = Math.max(minStrength, res.scentStrength - consumeRate * use);
-              // Optionally tie range to strength fraction
-              const frac = res.scentStrength / baseStrength;
-              const targetRange = Math.max(minRange, baseRange * frac);
-              // Smoothly relax toward target
-              res.scentRange += (targetRange - res.scentRange) * 0.5;
-            } else {
-              // Recover when no close orbiters
-              res.scentStrength = Math.min(baseStrength, res.scentStrength + recoverRate);
-              res.scentRange = Math.min(baseRange, res.scentRange + (baseRange - res.scentRange) * 0.1);
+          // Link formation pass (cheap local heuristic)
+          for (let i = 0; i < World.bundles.length; i++) {
+            for (let j = i + 1; j < World.bundles.length; j++) {
+              const a = World.bundles[i];
+              const b = World.bundles[j];
+              if (!a.alive || !b.alive) continue;
+              tryFormLink(a, b);
             }
           }
-        }
+
+          // Update each bundle with nearest resource
+          World.bundles.forEach(b => {
+            const nearestResource = World.getNearestResource(b);
+            b.update(dt, nearestResource);
+          });
+
+          if (tcEnabled) TcScheduler.runPhase('compute', tickContext);
+
+          // Link maintenance & decay, use-based strengthening
+          maintainLinks(dt);
+
+          Trail.step(dt);
+          if (CONFIG.signal.enabled) {
+            SignalField.step(dt);
+          }
+
+          // Trail reinforcement along active links
+          reinforceLinks(dt);
+
+          // Update resource ecology (carrying capacity dynamics)
+          World.updateEcology(dt);
+
+          // Consumable scent gradient: orbiting erodes, absence recovers
+          if (CONFIG.scentGradient.consumable) {
+            const orbitBand = CONFIG.scentGradient.orbitBandPx;
+            const minStrength = CONFIG.scentGradient.minStrength;
+            const minRange = CONFIG.scentGradient.minRange;
+            const baseStrength = CONFIG.scentGradient.strength;
+            const baseRange = CONFIG.scentGradient.maxRange;
+            const consumeRate = CONFIG.scentGradient.consumePerSec * dt;
+            const recoverRate = CONFIG.scentGradient.recoverPerSec * dt;
+
+            for (const res of World.resources) {
+              if (!res.visible) continue;
+              // Find nearest alive agent distance
+              let nearest = Infinity;
+              for (const b of World.bundles) {
+                if (!b.alive) continue;
+                const d = Math.hypot(res.x - b.x, res.y - b.y);
+                if (d < nearest) nearest = d;
+              }
+              // Inside orbit band (outside core radius)
+              const inner = res.r;
+              const outer = res.r + orbitBand;
+              if (nearest > inner && nearest <= outer) {
+                const t = 1 - (nearest - inner) / Math.max(1e-6, outer - inner); // 0..1 closer => bigger
+                const use = t * t; // quadratic for stronger close-in consumption
+                res.scentStrength = Math.max(minStrength, res.scentStrength - consumeRate * use);
+                // Optionally tie range to strength fraction
+                const frac = res.scentStrength / baseStrength;
+                const targetRange = Math.max(minRange, baseRange * frac);
+                // Smoothly relax toward target
+                res.scentRange += (targetRange - res.scentRange) * 0.5;
+              } else {
+                // Recover when no close orbiters
+                res.scentStrength = Math.min(baseStrength, res.scentStrength + recoverRate);
+                res.scentRange = Math.min(baseRange, res.scentRange + (baseRange - res.scentRange) * 0.1);
+              }
+            }
+          }
         
         // Clean up expired lineage links
         World.cleanupLineageLinks();
@@ -2598,6 +2613,7 @@ import { SignalResponseAnalytics } from './analysis/signalResponseAnalytics.js';
           }
           }
 
+          if (tcEnabled) TcScheduler.runPhase('commit', tickContext);
           globalTick++;
           if (globalTick - lastSignalStatTick >= 30) {
             lastSignalStatTick = globalTick;
@@ -2621,6 +2637,10 @@ import { SignalResponseAnalytics } from './analysis/signalResponseAnalytics.js';
           console.error('Critical error in main loop (tick ' + globalTick + '):', err);
           console.error('Stack trace:', err.stack);
           // Don't pause - let simulation continue
+        } finally {
+          if (tcEnabled && tickContext) {
+            TcScheduler.endTick(tickContext);
+          }
         }
       }
   
@@ -2703,35 +2723,45 @@ import { SignalResponseAnalytics } from './analysis/signalResponseAnalytics.js';
       // Run episode (continue while ANY agent is alive)
       while (episodeTicks < maxTicks && World.bundles.some(b => b.alive)) {
         const dt = 1/60; // Fixed timestep for training
-        
-        // Capture snapshot for fair trail sampling
-        Trail.captureSnapshot();
-        if (CONFIG.signal.enabled) {
-          SignalField.captureSnapshot();
-        }
+        const tcEnabled = TcScheduler.getConfig().enabled;
+        const beginTick = tcEnabled ? TcScheduler.beginTick({
+          tick: globalTick,
+          dt,
+          mode: 'train',
+          scheduler: 'episode',
+          world: World
+        }) : null;
+        let tickContext = beginTick;
+        try {
+          // Capture snapshot for fair trail sampling
+          Trail.captureSnapshot();
+          if (CONFIG.signal.enabled) {
+            SignalField.captureSnapshot();
+          }
+          if (tcEnabled) TcScheduler.runPhase('capture', tickContext);
 
-        // Update BOTH agents
-        let totalChiSpent = 0;
-        let totalCollected = 0;
-        
-        for (let i = 0; i < World.bundles.length; i++) {
+          // Update BOTH agents
+          let totalChiSpent = 0;
+          let totalCollected = 0;
+
+          for (let i = 0; i < World.bundles.length; i++) {
           const bundle = World.bundles[i];
           if (!bundle.alive) continue; // Skip dead agents
-          
+
           // Track chi before update
           const chiBeforeUpdate = bundle.chi;
-          
+
           // Update bundle with nearest resource
           const nearestResource = World.getNearestResource(bundle);
           bundle.update(dt, nearestResource);
-          
+
           // Calculate chi spent
           const chiSpent = Math.max(0, chiBeforeUpdate - bundle.chi);
           totalChiSpent += chiSpent;
-          
+
           // Check resource collection - check all resources
           let collectedResource = false;
-          
+
           for (let res of World.resources) {
             // Only collect if resource is visible (not on cooldown)
             if (bundle.alive && res.visible && bundle.overlapsResource(res)) {
@@ -2792,19 +2822,28 @@ import { SignalResponseAnalytics } from './analysis/signalResponseAnalytics.js';
           );
           totalReward += stepReward;
         }
-        
-        // Update trail field (shared environment)
-        Trail.step(dt);
-        if (CONFIG.signal.enabled) {
-          SignalField.step(dt);
-        }
 
-        globalTick++;
-        episodeTicks++;
-        
-        // Yield to browser occasionally to keep UI responsive
-        if (episodeTicks % 100 === 0) {
-          await new Promise(resolve => setTimeout(resolve, 0));
+          if (tcEnabled) TcScheduler.runPhase('compute', tickContext);
+
+          // Update trail field (shared environment)
+          Trail.step(dt);
+          if (CONFIG.signal.enabled) {
+            SignalField.step(dt);
+          }
+
+          if (tcEnabled) TcScheduler.runPhase('commit', tickContext);
+
+          globalTick++;
+          episodeTicks++;
+
+          // Yield to browser occasionally to keep UI responsive
+          if (episodeTicks % 100 === 0) {
+            await new Promise(resolve => setTimeout(resolve, 0));
+          }
+        } finally {
+          if (tcEnabled && tickContext) {
+            TcScheduler.endTick(tickContext);
+          }
         }
       }
       

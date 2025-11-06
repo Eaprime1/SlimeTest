@@ -2,11 +2,45 @@
 // Enables pluggable behavior: heuristic OR learned policy
 
 import { CONFIG } from './config.js';
+import { TcRandom, TcScheduler } from './tcStorage.js';
 
 // ========== Base Controller ==========
 // Interface: all controllers must implement act(obs)
 export class Controller {
-  constructor() {}
+  constructor() {
+    this._tcUnsubscribe = null;
+  }
+
+  registerTcHooks(hooks) {
+    this.clearTcHooks();
+    if (!hooks) return;
+    const normalized = typeof hooks === 'function' ? hooks(this) : hooks;
+    if (!normalized) return;
+    const mapped = {};
+    if (typeof normalized.capture === 'function') {
+      mapped.capture = (ctx) => normalized.capture.call(this, ctx);
+    }
+    if (typeof normalized.compute === 'function') {
+      mapped.compute = (ctx) => normalized.compute.call(this, ctx);
+    }
+    if (typeof normalized.commit === 'function') {
+      mapped.commit = (ctx) => normalized.commit.call(this, ctx);
+    }
+    if (Object.keys(mapped).length) {
+      this._tcUnsubscribe = TcScheduler.registerHooks(mapped);
+    }
+  }
+
+  clearTcHooks() {
+    if (typeof this._tcUnsubscribe === 'function') {
+      try {
+        this._tcUnsubscribe();
+      } catch (err) {
+        console.error('Error clearing TC controller hooks:', err);
+      }
+    }
+    this._tcUnsubscribe = null;
+  }
   
   /**
    * Given an observation, return an action
@@ -28,7 +62,9 @@ export class Controller {
   /**
    * Optional: reset for new episode
    */
-  reset() {}
+  reset() {
+    this.clearTcHooks();
+  }
 }
 
 // ========== Heuristic Controller ==========
@@ -107,7 +143,7 @@ export class LinearPolicyController extends Controller {
     for (let i = 0; i < rows; i++) {
       const row = [];
       for (let j = 0; j < cols; j++) {
-        row.push((Math.random() - 0.5) * 2 * scale);
+        row.push((TcRandom.random() - 0.5) * 2 * scale);
       }
       mat.push(row);
     }
@@ -117,7 +153,7 @@ export class LinearPolicyController extends Controller {
   randomVector(dim, scale) {
     const vec = [];
     for (let i = 0; i < dim; i++) {
-      vec.push((Math.random() - 0.5) * 2 * scale);
+      vec.push((TcRandom.random() - 0.5) * 2 * scale);
     }
     return vec;
   }

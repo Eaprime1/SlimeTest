@@ -1,6 +1,8 @@
 // Slime-Bundle Configuration
 // Organized config for physics, trails, AI, and learning
 
+import { applyTcConfig } from './tcStorage.js';
+
 export const CONFIG = {
   // === Physics & Core Mechanics ===
   startChi: 15,
@@ -10,6 +12,17 @@ export const CONFIG = {
   rewardChi: 10,                    // DEPRECATED: kept for backward compatibility
   resourceRadius: 10,
   bundleSize: 40,
+
+  // === Turing Completeness Recording ===
+  tc: {
+    enabled: false,
+    seed: 0,
+    tickSalt: 0x9e3779b9,
+    maxCachedChunks: 64,
+    updateCadence: null,
+    mode: null,
+    snapshots: {}
+  },
 
   // === Resource Ecology (dynamic resource availability) ===
   resourceDynamicCount: true,       // Use dynamic resource ecology vs fixed count
@@ -330,6 +343,8 @@ export const CONFIG = {
   },
 };
 
+applyTcConfig(CONFIG.tc || {});
+
 // --- Snapshots for panel resets ---
 let CURRENT_BASE_SNAPSHOT = null;        // last loaded/applied profile
 let BOOT_SNAPSHOT = null;                // factory defaults (boot-time read)
@@ -450,6 +465,12 @@ export const CONFIG_SCHEMA = {
     aiSurgeMax: { label: "Surge max", min: 0, max: 5, step: 0.01 },
     aiTurnRateBase: { label: "Turn rate base", min: 0, max: 20, step: 0.1 },
     aiTurnRateGain: { label: "Turn rate gain", min: 0, max: 20, step: 0.1 },
+  },
+  TC: {
+    "tc.enabled": { label: "Enable TC runtime", type: "boolean" },
+    "tc.seed": { label: "TC seed", min: 0, max: 4294967295, step: 1 },
+    "tc.maxCachedChunks": { label: "TC cache size", min: 1, max: 2048, step: 1 },
+    "tc.updateCadence": { label: "TC update cadence", min: 0, max: 1000, step: 1 }
   },
   Hunger: {
     hungerBuildRate: { label: "Hunger build/sec", min: 0, max: 5, step: 0.01 },
@@ -886,6 +907,7 @@ function onConfigChanged() {
   // If trailCell changed, resize trail grid:
   if (typeof Trail !== 'undefined' && Trail && Trail.cell !== CONFIG.trailCell) Trail.resize();
   // You can add other "apply" hooks as needed.
+  applyTcConfig(CONFIG.tc || {});
   if (typeof window !== 'undefined' && window.SignalField) {
     const field = window.SignalField;
     const desiredCell = CONFIG.signal.cell;
