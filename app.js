@@ -174,6 +174,10 @@ import { FertilityGrid, attemptSeedDispersal, attemptSpontaneousGrowth, getResou
       distress: 1,
       bond: 2
     };
+    const SIGNAL_MEMORY_LENGTH = Math.max(3, CONFIG.signal?.memoryLength || 12);
+    const SIGNAL_DISTRESS_NOISE_GAIN = 1.5;
+    const SIGNAL_RESOURCE_PULL_GAIN = 0.65;
+    const SIGNAL_BOND_CONFLICT_DAMP = 0.7;
     const normalizeRewardSignal = (rewardChi) => {
       if (!Number.isFinite(rewardChi)) return 0;
       const base = Math.max(CONFIG.rewardChi || rewardChi || 0, 1e-6);
@@ -559,6 +563,20 @@ import { FertilityGrid, attemptSeedDispersal, attemptSpontaneousGrowth, getResou
         // hunger (0..1) - biological drive that amplifies exploration and frustration
         this.hunger = 0;
 
+        // signal perception history and interpretations
+        this.signal_memory = {};
+        this.interpretation_bias = {};
+        this.signalContext = {};
+        this._signalContextTick = -1;
+        for (const channel of Object.keys(SIGNAL_CHANNELS)) {
+          this.signal_memory[channel] = {
+            values: new Array(SIGNAL_MEMORY_LENGTH).fill(0),
+            index: 0,
+            sum: 0
+          };
+          this.interpretation_bias[channel] = 0;
+        }
+
         // heading cache & angle
         this._lastDirX = 1; this._lastDirY = 0;
         this.heading = 0; // angle in radians (0 = right, π/2 = down)
@@ -640,6 +658,10 @@ import { FertilityGrid, attemptSeedDispersal, attemptSpontaneousGrowth, getResou
       computeAIDirection(resource) {
         let dx = 0, dy = 0;
         let resourceVisible = false;
+        const signals = this.signalContext || {};
+        const distressBias = clamp(this.interpretation_bias?.distress ?? 0, 0, 1);
+        const resourceBias = clamp(this.interpretation_bias?.resource ?? 0, 0, 1);
+        const bondConflict = clamp(this.interpretation_bias?.bond ?? 0, 0, 1);
 
         // (1) Wall avoidance - repulsion from ALL nearby walls (handles corners!)
         const wallMargin = CONFIG.aiWallAvoidMargin;
@@ -701,7 +723,7 @@ import { FertilityGrid, attemptSeedDispersal, attemptSpontaneousGrowth, getResou
           const wallProximity = 1 - (dMin / wallMargin); // 0 = far, 1 = at wall
           trailStrength *= (1 - wallProximity * 0.7); // Reduce up to 70% when at wall
         }
-        
+
         if (trailStrength > 0) {
           const sampleDist = CONFIG.aiSampleDistance;
           let sumX = 0, sumY = 0, wsum = 0;
@@ -723,7 +745,16 @@ import { FertilityGrid, attemptSeedDispersal, attemptSpontaneousGrowth, getResou
             }
           }
         }
-        
+
+        if (resourceBias > 0 && this.hunger >= CONFIG.hungerThresholdHigh) {
+          const grad = signals.resource?.gradient;
+          if (grad && (grad.dx !== 0 || grad.dy !== 0)) {
+            const pull = resourceBias * SIGNAL_RESOURCE_PULL_GAIN;
+            dx += grad.dx * pull;
+            dy += grad.dy * pull;
+          }
+        }
+
         // (3.5) Link guidance and spring (when no resource visible)
         if (!resourceVisible) {
           const h = clamp(this.hunger, 0, 1);
@@ -733,7 +764,9 @@ import { FertilityGrid, attemptSeedDispersal, attemptSpontaneousGrowth, getResou
             const x = Math.max(0, hv - t0) / Math.max(1e-6, 1 - t0);
             return Math.min(1, x * x); // quadratic ramp for decisiveness
           })(CONFIG.hungerThresholdHigh, h);
-          const damp = 1 - CONFIG.link.hungerEscape * escape;
+          const hungerDamp = 1 - CONFIG.link.hungerEscape * escape;
+          const conflictDamp = 1 - bondConflict * SIGNAL_BOND_CONFLICT_DAMP;
+          const damp = Math.max(0, hungerDamp * conflictDamp);
           const myLinks = linksForAgent(this.id);
           for (const L of myLinks) {
             const other = getBundleById(otherId(L, this.id));
@@ -758,7 +791,8 @@ import { FertilityGrid, attemptSeedDispersal, attemptSpontaneousGrowth, getResou
         // Hunger amplifies exploration - hungry agents explore more desperately
         const hungerAmp = 1 + (CONFIG.hungerExplorationAmp - 1) * h;
         const bereaveMul = 1 + (this.bereavementBoostTicks > 0 ? (CONFIG.bondLoss?.onDeathExploreBoost ?? 0) : 0);
-        const noise = (CONFIG.aiExploreNoiseBase + CONFIG.aiExploreNoiseGain * f) * hungerAmp * bereaveMul;
+        const distressMul = 1 + distressBias * SIGNAL_DISTRESS_NOISE_GAIN;
+        const noise = (CONFIG.aiExploreNoiseBase + CONFIG.aiExploreNoiseGain * f) * hungerAmp * bereaveMul * distressMul;
         dx += (Math.random() - 0.5) * noise * (resourceVisible ? 1.0 : 1.8);
         dy += (Math.random() - 0.5) * noise * (resourceVisible ? 1.0 : 1.8);
   
@@ -776,6 +810,9 @@ import { FertilityGrid, attemptSeedDispersal, attemptSpontaneousGrowth, getResou
         // Base metabolism + sensing costs
         let chiSpend = CONFIG.baseDecayPerSecond * dt;
         chiSpend += this.computeSensoryRange(dt);
+
+        // Refresh signal perception once per tick before decisions
+        this.captureSignalContext();
 
         // Update hunger (biological drive)
         this.updateHunger(dt);
@@ -890,6 +927,112 @@ import { FertilityGrid, attemptSeedDispersal, attemptSpontaneousGrowth, getResou
         SignalField.deposit(px, py, delta, channelIndex);
       }
 
+      recordSignalSample(channel, amplitude) {
+        if (!this.signal_memory[channel]) {
+          this.signal_memory[channel] = {
+            values: new Array(SIGNAL_MEMORY_LENGTH).fill(0),
+            index: 0,
+            sum: 0
+          };
+        }
+        const buffer = this.signal_memory[channel];
+        const len = buffer.values.length;
+        if (len === 0) return;
+        const idx = buffer.index % len;
+        const prev = buffer.values[idx];
+        buffer.sum -= prev;
+        const clamped = clamp(amplitude ?? 0, 0, 1);
+        buffer.values[idx] = clamped;
+        buffer.sum += clamped;
+        buffer.index = (idx + 1) % len;
+      }
+
+      getSignalAverage(channel) {
+        const buffer = this.signal_memory?.[channel];
+        if (!buffer || !buffer.values.length) return 0;
+        return buffer.sum / buffer.values.length;
+      }
+
+      captureSignalContext(force = false) {
+        if (!force && this._signalContextTick === globalTick) {
+          return this.signalContext;
+        }
+
+        if (!CONFIG.signal?.enabled || !SignalField || typeof SignalField.sample !== 'function') {
+          this.signalContext = {};
+          this._signalContextTick = globalTick;
+          for (const key of Object.keys(this.interpretation_bias)) {
+            this.interpretation_bias[key] = 0;
+          }
+          return this.signalContext;
+        }
+
+        const context = {};
+        const sampleRadius = Math.max(4, (SignalField.cell || CONFIG.signal.cell || 8));
+        for (const [name, index] of Object.entries(SIGNAL_CHANNELS)) {
+          const amp = clamp(SignalField.sample(this.x, this.y, index) || 0, 0, 1);
+          this.recordSignalSample(name, amp);
+          const gradient = this.computeSignalGradient(index, sampleRadius);
+          context[name] = { amplitude: amp, gradient };
+        }
+
+        this.signalContext = context;
+        this._signalContextTick = globalTick;
+        this.updateInterpretationBias(context);
+        return context;
+      }
+
+      computeSignalGradient(channelIndex, radius) {
+        if (!CONFIG.signal?.enabled || !SignalField || typeof SignalField.sample !== 'function') {
+          return { dx: 0, dy: 0, mag: 0 };
+        }
+        const step = Math.max(1, radius || 1);
+        const cx = this.x;
+        const cy = this.y;
+        const sample = (px, py) => clamp(SignalField.sample(px, py, channelIndex) || 0, 0, 1);
+        const left = sample(cx - step, cy);
+        const right = sample(cx + step, cy);
+        const up = sample(cx, cy - step);
+        const down = sample(cx, cy + step);
+        const gradX = (right - left) * 0.5;
+        const gradY = (down - up) * 0.5;
+        const mag = Math.hypot(gradX, gradY);
+        if (mag <= 1e-6) {
+          return { dx: 0, dy: 0, mag: 0 };
+        }
+        const norm = Math.min(1, mag);
+        return { dx: gradX / mag, dy: gradY / mag, mag: norm };
+      }
+
+      updateInterpretationBias(context = this.signalContext) {
+        const distressAmp = context?.distress?.amplitude ?? 0;
+        this.interpretation_bias.distress = clamp(distressAmp, 0, 1);
+
+        const resourceGrad = context?.resource?.gradient;
+        if (resourceGrad) {
+          if (this.hunger >= CONFIG.hungerThresholdHigh) {
+            const hungerSpan = Math.max(1e-6, 1 - CONFIG.hungerThresholdHigh);
+            const hungerFactor = clamp((this.hunger - CONFIG.hungerThresholdHigh) / hungerSpan, 0, 1);
+            this.interpretation_bias.resource = clamp(resourceGrad.mag * hungerFactor, 0, 1);
+          } else {
+            this.interpretation_bias.resource = 0;
+          }
+        } else {
+          this.interpretation_bias.resource = 0;
+        }
+
+        const bondGrad = context?.bond?.gradient;
+        if (bondGrad) {
+          const dirX = this._lastDirX;
+          const dirY = this._lastDirY;
+          const dot = dirX * bondGrad.dx + dirY * bondGrad.dy;
+          const conflict = Math.max(0, -dot) * bondGrad.mag;
+          this.interpretation_bias.bond = clamp(conflict, 0, 1);
+        } else {
+          this.interpretation_bias.bond = 0;
+        }
+      }
+
       updateHunger(dt) {
         // Hunger increases over time - biological drive
         this.hunger = Math.min(1, this.hunger + CONFIG.hungerBuildRate * dt);
@@ -915,6 +1058,7 @@ import { FertilityGrid, attemptSeedDispersal, attemptSpontaneousGrowth, getResou
 
       updateHeuristicMovement(dt, resource) {
         // Steering (manual only for agent 1 in MANUAL mode)
+        this.captureSignalContext();
         let want = { dx: 0, dy: 0 };
         if (CONFIG.autoMove || this.id !== 1) {
           want = this.computeAIDirection(resource);
