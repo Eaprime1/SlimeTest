@@ -1,16 +1,25 @@
 // Slime-Bundle Configuration
 // Organized config for physics, trails, AI, and learning
 
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+// Note: Node.js filesystem imports are commented out for browser compatibility
+// If you need to run this in Node.js (e.g., for testing), uncomment these:
+// import fs from 'node:fs';
+// import path from 'node:path';
+// import { fileURLToPath } from 'node:url';
+
+// Browser-compatible stubs for Node.js modules
+const fs = null;
+const path = {
+  isAbsolute: (p) => false,
+  resolve: (...args) => args[args.length - 1],
+  dirname: (p) => ''
+};
+const __filename = '';
+const __dirname = '';
+const hasFs = false;
+
 import { applyTcConfig } from './tcStorage.js';
 import { TapeMachineRegistry } from './tc/tcTape.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const hasFs = fs && typeof fs.readFileSync === 'function';
 
 const resolveConfigPath = (maybePath) => {
   if (!maybePath || typeof maybePath !== 'string') return null;
