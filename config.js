@@ -99,6 +99,7 @@ const loadTapeMachinesFromConfig = (tcConfig = {}) => {
 };
 
 export const CONFIG = {
+  debug: false,
   // === Physics & Core Mechanics ===
   startChi: 15,
   baseDecayPerSecond: 0.10,
@@ -537,6 +538,9 @@ function initSnapshotsOnce() {
 
 
 export const CONFIG_SCHEMA = {
+  Diagnostics: {
+    debug: { label: "Debug mode", type: "boolean" }
+  },
   Metabolism: {
     startChi: { label: "Start χ", min: 0, max: 200, step: 1 },
     baseDecayPerSecond: { label: "Leak χ/sec", min: 0, max: 2, step: 0.01 },
@@ -803,6 +807,7 @@ export const CONFIG_SCHEMA = {
 };
 
 const CONFIG_HINTS = {
+  debug: "Enable debug instrumentation and telemetry forwarding.",
   // Metabolism
   startChi: "Starting chi for freshly spawned agents.",
   baseDecayPerSecond: "Passive chi leak each second.",

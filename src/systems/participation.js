@@ -1,8 +1,39 @@
 import { clamp } from '../utils/math.js';
+import { CONFIG } from '../../config.js';
 import { SignalField } from '../../signalField.js';
+import { SignalResponseAnalytics } from '../../analysis/signalResponseAnalytics.js';
 
 const noop = () => {};
 const noopNumber = () => 0;
+
+const DEBUG_EVENT_LIMIT = 240;
+
+const createDebugSummary = () => ({
+  pointerDown: 0,
+  pointerUp: 0,
+  wavesSpawned: 0,
+  energyPulses: 0,
+  forceApplications: 0,
+  energySamples: 0,
+  modeChanges: 0,
+  activeChanges: 0,
+  resets: 0,
+  clearOperations: 0,
+  lastEvent: null
+});
+
+const DEBUG_SUMMARY_MAP = {
+  'pointer-down': 'pointerDown',
+  'pointer-up': 'pointerUp',
+  'wave-spawn': 'wavesSpawned',
+  'energy-pulse': 'energyPulses',
+  'apply-force': 'forceApplications',
+  'sample-energy': 'energySamples',
+  'mode-change': 'modeChanges',
+  'active-change': 'activeChanges',
+  'state-reset': 'resets',
+  'clear-fields': 'clearOperations'
+};
 
 const EPSILON = 1e-6;
 const DEFAULT_FORCE_FRACTION = 0.35;
@@ -62,7 +93,8 @@ const state = {
     elapsed: 0,
     delta: 0,
     modeStart: 0,
-    inactiveTime: 0
+    inactiveTime: 0,
+    tick: 0
   },
   lastForce: { ax: 0, ay: 0 },
   forceViz: {
@@ -73,7 +105,9 @@ const state = {
     lastAy: 0,
     intensity: 0,
     updatedAt: 0
-  }
+  },
+  debugEvents: [],
+  debugSummary: createDebugSummary()
 };
 
 const hooks = {
@@ -90,6 +124,78 @@ const pointerHooks = {
   onPointerMove: noop,
   onPointerUp: noop,
   onPointerCancel: noop
+};
+
+const nowTimestamp = () => {
+  if (typeof performance !== 'undefined' && typeof performance.now === 'function') {
+    return performance.now();
+  }
+  return Date.now();
+};
+
+const emitDebugEvent = (event, detail = {}, telemetry) => {
+  if (!CONFIG?.debug) {
+    return;
+  }
+
+  const tick = state.timers.tick ?? 0;
+  const record = {
+    event,
+    detail: { ...detail },
+    tick,
+    time: state.timers.elapsed,
+    mode: state.mode,
+    active: state.isActive,
+    timestamp: nowTimestamp()
+  };
+
+  if (!Array.isArray(state.debugEvents)) {
+    state.debugEvents = [];
+  }
+  state.debugEvents.push(record);
+  if (state.debugEvents.length > DEBUG_EVENT_LIMIT) {
+    state.debugEvents.shift();
+  }
+
+  if (!state.debugSummary) {
+    state.debugSummary = createDebugSummary();
+  }
+  const summaryKey = DEBUG_SUMMARY_MAP[event];
+  if (summaryKey) {
+    state.debugSummary[summaryKey] = (state.debugSummary[summaryKey] || 0) + 1;
+  }
+  state.debugSummary.lastEvent = { event, tick };
+
+  if (typeof window !== 'undefined') {
+    const store = window.DEBUG_CHANNELS = window.DEBUG_CHANNELS || {};
+    const channel = store.participation = store.participation || [];
+    channel.push(record);
+    if (channel.length > DEBUG_EVENT_LIMIT) {
+      channel.shift();
+    }
+    if (typeof store.emit === 'function') {
+      try {
+        store.emit('participation', record);
+      } catch (_error) {
+        // Ignore debug channel emit errors
+      }
+    }
+    const telemetryStore = store.telemetry = store.telemetry || {};
+    telemetryStore.participation = {
+      summary: { ...state.debugSummary }
+    };
+  }
+
+  if (!telemetry) {
+    return;
+  }
+
+  const { channel, kind, agentId = 'participation', meta = {} } = telemetry;
+  if (kind === 'stimulus' && typeof SignalResponseAnalytics?.logStimulus === 'function') {
+    SignalResponseAnalytics.logStimulus(channel, tick, agentId, meta);
+  } else if (kind === 'response' && typeof SignalResponseAnalytics?.logResponse === 'function') {
+    SignalResponseAnalytics.logResponse(channel, tick, agentId, meta);
+  }
 };
 
 const clamp01 = (value) => Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
@@ -192,6 +298,22 @@ function defaultPointerDown(localState, config, payload) {
     decay,
     config
   });
+  emitDebugEvent('pointer-down', {
+    pointerId,
+    mode,
+    x: payload.x,
+    y: payload.y,
+    radius,
+    strength
+  }, {
+    channel: 'participation.pointer',
+    kind: 'stimulus',
+    agentId: String(pointerId),
+    meta: {
+      amplitude: Math.abs(strength),
+      gradient: Math.abs(radius)
+    }
+  });
   localState.pointerEmitters.set(pointerId, {
     id: pointerId,
     mode,
@@ -260,6 +382,7 @@ function defaultPointerUp(localState, _config, payload) {
     setActive(false);
     setCursor({ visible: false });
   }
+  emitDebugEvent('pointer-up', { pointerId });
 }
 
 const resolvePointerMode = (payload) => {
@@ -285,6 +408,7 @@ function setMode(mode) {
   if (typeof mode === 'string' && mode !== state.mode) {
     state.mode = mode;
     state.timers.modeStart = state.timers.elapsed;
+    emitDebugEvent('mode-change', { mode });
   }
 }
 
@@ -296,7 +420,9 @@ function setActive(isActive) {
     if (!nextActive) {
       clearActiveFieldEntries();
       resetForce(state);
+      setCursor({ visible: false });
     }
+    emitDebugEvent('active-change', { active: nextActive });
   }
 }
 
@@ -319,6 +445,7 @@ function setActiveFieldEntry(key, value) {
   if (value === undefined || value === null) {
     state.activeFields.delete(key);
     state.pointerEmitters.delete(key);
+    emitDebugEvent('clear-fields', { key });
     return;
   }
   const existing = state.activeFields.get(key);
@@ -408,6 +535,24 @@ function spawnSignalWave({
 
   // Initial pulse so that newly spawned waves are immediately perceivable.
   propagateWaveToSignalField(wave, state.timers.delta || 0.016);
+
+  emitDebugEvent('wave-spawn', {
+    id: wave.id,
+    mode: wave.mode,
+    x: wave.x,
+    y: wave.y,
+    radius: wave.maxRadius,
+    intensity: wave.intensity,
+    channel: wave.channel
+  }, {
+    channel: 'participation.wave',
+    kind: 'stimulus',
+    agentId: String(wave.mode || 'wave'),
+    meta: {
+      amplitude: wave.intensity,
+      gradient: wave.maxRadius
+    }
+  });
 
   return wave;
 }
@@ -695,6 +840,21 @@ function registerEnergyPulse(target, maybeDelta) {
   entry.updatedAt = now;
   entry.createdAt = existing?.createdAt ?? now;
   state.energyBursts.set(id, entry);
+  emitDebugEvent('energy-pulse', {
+    id,
+    x: entry.x,
+    y: entry.y,
+    delta,
+    intensity: entry.intensity
+  }, {
+    channel: 'participation.energy',
+    kind: 'stimulus',
+    agentId: String(id),
+    meta: {
+      amplitude: Math.abs(delta),
+      gradient: entry.intensity
+    }
+  });
   return entry;
 }
 
@@ -774,6 +934,7 @@ function update(dt) {
   if (!state.isActive) {
     state.timers.inactiveTime += delta;
   }
+  state.timers.tick = (state.timers.tick || 0) + 1;
   const config = getConfig();
   if (!config?.enabled && state.isActive) {
     setActive(false);
@@ -919,13 +1080,43 @@ function applyForce(context) {
       }
       state.forceViz.updatedAt = state.timers.elapsed;
     }
+    const magnitude = Math.hypot(force.ax, force.ay);
+    emitDebugEvent('apply-force', {
+      bundleId: context?.bundle?.id ?? null,
+      ax: force.ax,
+      ay: force.ay,
+      magnitude
+    }, {
+      channel: 'participation.force',
+      kind: 'response',
+      agentId: context?.bundle?.id ?? 'unknown',
+      meta: {
+        magnitude,
+        mode: state.mode || 'idle'
+      }
+    });
   }
   return force;
 }
 
 function sampleEnergy(agentBundle) {
   const sample = hooks.onSampleEnergy(state, getConfig(), agentBundle);
-  return typeof sample === 'number' && Number.isFinite(sample) ? sample : 0;
+  if (typeof sample === 'number' && Number.isFinite(sample) && sample !== 0) {
+    emitDebugEvent('sample-energy', {
+      bundleId: agentBundle?.id ?? null,
+      value: sample
+    }, {
+      channel: 'participation.energy',
+      kind: 'response',
+      agentId: agentBundle?.id ?? 'unknown',
+      meta: {
+        magnitude: Math.abs(sample),
+        mode: state.mode || 'idle'
+      }
+    });
+    return sample;
+  }
+  return 0;
 }
 
 function sampleSignal(agentBundle) {
@@ -1026,6 +1217,7 @@ function resetTimers() {
   state.timers.delta = 0;
   state.timers.modeStart = 0;
   state.timers.inactiveTime = 0;
+  state.timers.tick = 0;
   state.signalWaves = [];
   state.pointerEmitters.clear();
   state.waveSequence = 0;
@@ -1038,6 +1230,49 @@ function resetTimers() {
   state.forceViz.intensity = 0;
 }
 
+function resetState({
+  reason = 'reset',
+  clearEvents = true,
+  clearSummary = true,
+  resetMode = true,
+  resetCursor = true
+} = {}) {
+  if (resetMode) {
+    state.mode = 'idle';
+  }
+  if (resetCursor) {
+    state.cursor.x = 0;
+    state.cursor.y = 0;
+    state.cursor.visible = false;
+  }
+  setActive(false);
+  clearActiveFieldEntries();
+  clearSignalWaves();
+  resetTimers();
+  if (clearEvents) {
+    state.debugEvents = [];
+  }
+  if (clearSummary || !state.debugSummary) {
+    state.debugSummary = createDebugSummary();
+  }
+  emitDebugEvent('state-reset', { reason });
+}
+
+function getDebugEvents() {
+  return Array.isArray(state.debugEvents) ? state.debugEvents.slice() : [];
+}
+
+function getDebugSummary() {
+  if (!state.debugSummary) {
+    return createDebugSummary();
+  }
+  const summary = { ...state.debugSummary };
+  if (summary.lastEvent) {
+    summary.lastEvent = { ...summary.lastEvent };
+  }
+  return summary;
+}
+
 const manager = {
   state,
   setMode,
@@ -1047,6 +1282,7 @@ const manager = {
   clearActiveFieldEntries,
   clearSignalWaves,
   resetTimers,
+  resetState,
   getConfig,
   setConfig,
   setEmitters,
@@ -1062,7 +1298,9 @@ const manager = {
   sampleWaveStrengths,
   registerEnergyPulse,
   draw,
-  getLastForce
+  getLastForce,
+  getDebugEvents,
+  getDebugSummary
 };
 
 export default manager;
