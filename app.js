@@ -556,7 +556,7 @@ import { createTrainingModule } from './src/core/training.js';
       window.World = World;
     }
 
-    const { getLearningMode, initializeTrainingUI } = createTrainingModule({
+    const trainingModule = createTrainingModule({
       world: World,
       config: CONFIG,
       trail: Trail,
@@ -748,7 +748,7 @@ import { createTrainingModule } from './src/core/training.js';
         const simLines = [
           `⚙️  SIMULATION`,
           `   mode:      ${CONFIG.autoMove ? "AUTO" : "MANUAL"}`,
-          `   learning:  ${getLearningMode() === 'train' ? "TRAINING" : "PLAY"}`,
+          `   learning:  ${trainingModule.getLearningMode() === 'train' ? "TRAINING" : "PLAY"}`,
           `   tick:      ${globalTick}`,
           `   χ earned:  ${World.collected}`
         ];
@@ -1373,7 +1373,7 @@ import { createTrainingModule } from './src/core/training.js';
 
     startSimulation({
       shouldStep: () => !World.paused,
-      getMode: () => getLearningMode(),
+      getMode: () => trainingModule.getLearningMode(),
       getPhases: () => simulationPhases,
       beginTick,
       endTick: (context) => {
@@ -1390,7 +1390,7 @@ import { createTrainingModule } from './src/core/training.js';
       }
     });
 
-    const initTrainingUI = () => initializeTrainingUI();
+    const initTrainingUI = () => trainingModule.initializeTrainingUI();
 
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', initTrainingUI, { once: true });
