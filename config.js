@@ -319,6 +319,31 @@ export const CONFIG = {
     orbitBandPx: 140                 // Band outside resource.r considered "orbit"
   },
 
+  // === TC-Resource Integration ===
+  // Link Rule 110 cellular automaton to resource generation
+  tcResourceIntegration: {
+    enabled: false,           // Set to true to link resources to Rule 110
+    
+    // How Rule 110 influences spawning
+    mode: 'hybrid',           // 'spatial' | 'activity' | 'hybrid'
+    
+    // Spatial mapping (Rule 110 X → World X)
+    spatialMapping: true,     // Map Rule 110 cell positions to world X coordinates
+    localityRadius: 5,        // Cells to check for local activity patterns
+    verticalSpread: 0.3,      // How much Y variation (0=flat line, 1=full height)
+    
+    // Activity modulation (Rule 110 density → spawn rate)
+    activityInfluence: 0.5,   // 0 = no influence, 1 = full control over spawn rate
+    minSpawnMultiplier: 0.5,  // Min spawn rate at 0% Rule 110 activity
+    maxSpawnMultiplier: 1.5,  // Max spawn rate at 100% Rule 110 activity
+    
+    // Visual feedback
+    showOverlay: true,       // Show Rule 110 state as overlay on world
+    overlayOpacity: 0.15,     // Overlay transparency
+    overlayHeight: 40,        // Height of Rule 110 visualization bar (pixels)
+    overlayPosition: 'top',   // 'top' | 'bottom'
+  },
+
   // === Mitosis System (Reproduction Mechanics) ===
   // Agents can reproduce when they have sufficient energy
   mitosis: {

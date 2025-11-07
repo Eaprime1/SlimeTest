@@ -15,6 +15,7 @@ import { visualizeScentGradient, visualizeScentHeatmap } from './scentGradient.j
 import { FertilityGrid, attemptSeedDispersal, attemptSpontaneousGrowth, getResourceSpawnLocation, getSpawnPressureMultiplier } from './plantEcology.js';
 import { SignalResponseAnalytics } from './analysis/signalResponseAnalytics.js';
 import { TcScheduler, TcRandom, TcStorage } from './tcStorage.js';
+import { getRule110SpawnLocation, getRule110SpawnMultiplier, getRule110SpawnInfo, drawRule110Overlay } from './tcResourceBridge.js';
 
 (() => {
     const canvas = document.getElementById("view");
@@ -1628,8 +1629,15 @@ import { TcScheduler, TcRandom, TcStorage } from './tcStorage.js';
       }
       
       respawn() {
+        // TC-Resource integration: spawn based on Rule 110 if enabled
+        if (CONFIG.tcResourceIntegration.enabled && typeof window !== 'undefined' && window.rule110Stepper) {
+          const spawnInfo = getRule110SpawnInfo(window.rule110Stepper, canvasWidth, canvasHeight);
+          this.x = spawnInfo.location.x;
+          this.y = spawnInfo.location.y;
+          this.tcData = spawnInfo.tcData; // Store TC metadata
+        }
         // Use fertility-based spawning if plant ecology enabled
-        if (CONFIG.plantEcology.enabled && FertilityField) {
+        else if (CONFIG.plantEcology.enabled && FertilityField) {
           const location = getResourceSpawnLocation(FertilityField, canvasWidth, canvasHeight);
           this.x = location.x;
           this.y = location.y;
@@ -1886,6 +1894,11 @@ import { TcScheduler, TcRandom, TcStorage } from './tcStorage.js';
       }
     };
     World.reset();
+    
+    // Expose World globally for console access
+    if (typeof window !== 'undefined') {
+      window.World = World;
+    }
   
     // ---------- Lineage Visualization ----------
     function drawLineageLinks(ctx) {
@@ -2690,7 +2703,15 @@ import { TcScheduler, TcRandom, TcStorage } from './tcStorage.js';
       });
       
       World.bundles.forEach(b => b.draw(ctx));
+      
       drawHUD();
+      
+      // Draw Rule 110 overlay LAST (on top of everything including HUD)
+      if (CONFIG.tcResourceIntegration.enabled && CONFIG.tcResourceIntegration.showOverlay) {
+        if (typeof window !== 'undefined' && window.rule110Stepper) {
+          drawRule110Overlay(ctx, window.rule110Stepper, canvasWidth, canvasHeight);
+        }
+      }
   
       requestAnimationFrame(loop);
     }
