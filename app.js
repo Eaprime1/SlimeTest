@@ -443,32 +443,6 @@ import { createTrainingModule } from './src/core/training.js';
 
     // Call resize after Trail is defined (done later in code)
 
-    const { getLearningMode, initializeTrainingUI } = createTrainingModule({
-      world: World,
-      config: CONFIG,
-      trail: Trail,
-      signalField: SignalField,
-      tcScheduler: TcScheduler,
-      ledger: Ledger,
-      episodeManager,
-      learner,
-      TrainingManagerClass: TrainingManager,
-      TrainingUIClass: TrainingUI,
-      normalizeRewardSignal,
-      updateFindTimeEMA,
-      calculateAdaptiveReward,
-      getGlobalTick: () => globalTick,
-      incrementGlobalTick: () => { globalTick += 1; },
-      setWorldPaused: (paused) => { World.paused = paused; },
-      onLearningModeChange: (mode) => {
-        if (mode === 'train') {
-          World.bundles.forEach((b) => (b.useController = true));
-        } else {
-          World.bundles.forEach((b) => (b.useController = false));
-        }
-      }
-    });
-
     // ---------- Fertility Grid (Plant Ecology) ----------
     let FertilityField = null;
     if (CONFIG.plantEcology.enabled) {
