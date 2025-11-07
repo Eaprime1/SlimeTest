@@ -2,6 +2,7 @@ import { CONFIG } from '../../config.js';
 import { SignalField } from '../../signalField.js';
 import { SignalResponseAnalytics } from '../../analysis/signalResponseAnalytics.js';
 import { TcScheduler, TcStorage, TcRandom } from '../../tcStorage.js';
+import ParticipationManager from '../systems/participation.js';
 
 const clampValue = (value, min, max) => Math.max(min, Math.min(max, value));
 
@@ -75,6 +76,9 @@ export function createWorld(context) {
       Trail.clear();
       SignalField.clear();
       SignalResponseAnalytics.reset();
+      if (ParticipationManager && typeof ParticipationManager.resetState === 'function') {
+        ParticipationManager.resetState({ reason: 'world-reset' });
+      }
       TcStorage.clear();
       TcScheduler.reset();
       setGlobalTick(0);

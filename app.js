@@ -200,16 +200,31 @@ import { collectResource } from './src/systems/resourceSystem.js';
       return applied;
     };
 
-    const resetParticipationEnergy = ({ clearFields = false } = {}) => {
+    const resetParticipationEnergy = ({
+      clearFields = false,
+      reason = 'reset',
+      clearEvents = true,
+      clearSummary = true
+    } = {}) => {
       if (!ParticipationManager) return;
-      if (typeof ParticipationManager.setActive === 'function') {
-        ParticipationManager.setActive(false);
-      }
-      if (clearFields && typeof ParticipationManager.clearActiveFieldEntries === 'function') {
-        ParticipationManager.clearActiveFieldEntries();
-      }
-      if (typeof ParticipationManager.resetTimers === 'function') {
-        ParticipationManager.resetTimers();
+      if (typeof ParticipationManager.resetState === 'function') {
+        ParticipationManager.resetState({
+          reason,
+          clearEvents,
+          clearSummary,
+          resetMode: true,
+          resetCursor: true
+        });
+      } else {
+        if (typeof ParticipationManager.setActive === 'function') {
+          ParticipationManager.setActive(false);
+        }
+        if (clearFields && typeof ParticipationManager.clearActiveFieldEntries === 'function') {
+          ParticipationManager.clearActiveFieldEntries();
+        }
+        if (typeof ParticipationManager.resetTimers === 'function') {
+          ParticipationManager.resetTimers();
+        }
       }
       if (typeof updateParticipationStatusUI === 'function') {
         updateParticipationStatusUI();
@@ -684,7 +699,15 @@ import { collectResource } from './src/systems/resourceSystem.js';
       if (World.paused === next) {
         if (!next && ParticipationManager) {
           // Resume clears timers without forcing active state
-          if (typeof ParticipationManager.resetTimers === 'function') {
+          if (typeof ParticipationManager.resetState === 'function') {
+            ParticipationManager.resetState({
+              reason: 'resume',
+              clearEvents: false,
+              clearSummary: false,
+              resetMode: false,
+              resetCursor: true
+            });
+          } else if (typeof ParticipationManager.resetTimers === 'function') {
             ParticipationManager.resetTimers();
           }
         }
@@ -694,9 +717,21 @@ import { collectResource } from './src/systems/resourceSystem.js';
       World.paused = next;
 
       if (next) {
-        resetParticipationEnergy({ clearFields: true });
-      } else if (ParticipationManager && typeof ParticipationManager.resetTimers === 'function') {
-        ParticipationManager.resetTimers();
+        resetParticipationEnergy({ reason: 'pause', clearFields: true, clearEvents: false, clearSummary: false });
+      } else if (ParticipationManager) {
+        if (typeof ParticipationManager.resetState === 'function') {
+          ParticipationManager.resetState({
+            reason: 'resume',
+            clearEvents: false,
+            clearSummary: false,
+            resetMode: false,
+            resetCursor: true
+          });
+          updateParticipationStatusUI();
+        } else if (typeof ParticipationManager.resetTimers === 'function') {
+          ParticipationManager.resetTimers();
+          updateParticipationStatusUI();
+        }
       }
 
       return World.paused;
@@ -709,7 +744,11 @@ import { collectResource } from './src/systems/resourceSystem.js';
     World.reset = (...args) => {
       setWorldPaused(false);
       const result = originalWorldReset(...args);
-      resetParticipationEnergy({ clearFields: true });
+      if (ParticipationManager && typeof ParticipationManager.resetState === 'function') {
+        updateParticipationStatusUI();
+      } else {
+        resetParticipationEnergy({ reason: 'world-reset', clearFields: true });
+      }
       return result;
     };
 
