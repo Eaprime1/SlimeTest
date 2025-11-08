@@ -40,10 +40,36 @@ import ParticipationManager from './src/systems/participation.js';
 import { startSimulation } from './src/core/simulationLoop.js';
 import { createTrainingModule } from './src/core/training.js';
 import { collectResource } from './src/systems/resourceSystem.js';
+import { MetricsTracker } from './src/core/metricsTracker.js';
 
 (() => {
     const canvas = document.getElementById("view");
     const ctx = canvas.getContext("2d", { alpha: false, desynchronized: true });
+
+    // ---------- PixiJS Integration ----------
+    const pixiApp = new PIXI.Application({
+        width: innerWidth,
+        height: innerHeight,
+        backgroundAlpha: 0,
+        resolution: window.devicePixelRatio || 1,
+        autoDensity: true,
+        autoStart: false,
+        antialias: true,  // Enable anti-aliasing for smooth edges
+        powerPreference: 'high-performance'
+    });
+    const resourcesContainer = new PIXI.Container();
+    resourcesContainer.sortableChildren = true;
+    pixiApp.stage.addChild(resourcesContainer);
+    const agentTrailsContainer = new PIXI.Container();
+    agentTrailsContainer.sortableChildren = true;
+    pixiApp.stage.addChild(agentTrailsContainer);
+    const agentsContainer = new PIXI.Container();
+    agentsContainer.sortableChildren = true;
+    pixiApp.stage.addChild(agentsContainer);
+    window.pixiApp = pixiApp; // For debugging
+    window.resourcesContainer = resourcesContainer; // For debugging
+    window.agentsContainer = agentsContainer; // For debugging
+    window.agentTrailsContainer = agentTrailsContainer; // For debugging
   
     // ---------- DPR-aware sizing ----------
     let dpr = 1;
@@ -268,6 +294,31 @@ import { collectResource } from './src/systems/resourceSystem.js';
     }
 
     // Generate color for agent based on ID (supports unlimited agents)
+    const hslToRgb = (hue, saturation, lightness) => {
+      const s = saturation;
+      const l = lightness;
+
+      const c = (1 - Math.abs(2 * l - 1)) * s;
+      const x = c * (1 - Math.abs((hue / 60) % 2 - 1));
+      const m = l - c / 2;
+
+      let r, g, b;
+      if (hue < 60) { r = c; g = x; b = 0; }
+      else if (hue < 120) { r = x; g = c; b = 0; }
+      else if (hue < 180) { r = 0; g = c; b = x; }
+      else if (hue < 240) { r = 0; g = x; b = c; }
+      else if (hue < 300) { r = x; g = 0; b = c; }
+      else { r = c; g = 0; b = x; }
+
+      return {
+        r: Math.round((r + m) * 255),
+        g: Math.round((g + m) * 255),
+        b: Math.round((b + m) * 255)
+      };
+    };
+
+    const rgbToHexString = ({ r, g, b }) => `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+
     const getAgentColor = (id, alive = true) => {
       // First 4 agents use classic colors for consistency
       const classicColors = {
@@ -276,18 +327,19 @@ import { collectResource } from './src/systems/resourceSystem.js';
         3: { alive: "#ffff00", dead: "#555500" },  // yellow
         4: { alive: "#ff8800", dead: "#553300" },  // orange
       };
-      
+
       if (id <= 4 && classicColors[id]) {
         return alive ? classicColors[id].alive : classicColors[id].dead;
       }
-      
-      // For agents beyond 4, use HSL with varying hue
+
+      // For agents beyond 4, use HSL with varying hue converted to hex
       const hue = ((id - 1) * 137.5) % 360; // Golden angle for good distribution
-      const saturation = alive ? 100 : 30;
-      const lightness = alive ? 50 : 20;
-      return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+      const saturation = alive ? 1.0 : 0.3;
+      const lightness = alive ? 0.5 : 0.2;
+      const rgb = hslToRgb(hue, saturation, lightness);
+      return rgbToHexString(rgb);
     };
-    
+
     // Get RGB values for trail rendering
     const getAgentColorRGB = (id) => {
       // First 4 use classic RGB
@@ -297,33 +349,15 @@ import { collectResource } from './src/systems/resourceSystem.js';
         3: { r: 255, g: 255, b: 0 },    // yellow
         4: { r: 255, g: 136, b: 0 }     // orange
       };
-      
+
       if (id <= 4 && classicRGB[id]) {
         return classicRGB[id];
       }
-      
-      // Convert HSL to RGB for agents beyond 4
+
       const hue = ((id - 1) * 137.5) % 360;
-      const s = 1.0;
-      const l = 0.5;
-      
-      const c = (1 - Math.abs(2 * l - 1)) * s;
-      const x = c * (1 - Math.abs((hue / 60) % 2 - 1));
-      const m = l - c / 2;
-      
-      let r, g, b;
-      if (hue < 60) { r = c; g = x; b = 0; }
-      else if (hue < 120) { r = x; g = c; b = 0; }
-      else if (hue < 180) { r = 0; g = c; b = x; }
-      else if (hue < 240) { r = 0; g = x; b = c; }
-      else if (hue < 300) { r = x; g = 0; b = c; }
-      else { r = c; g = 0; b = x; }
-      
-      return {
-        r: Math.round((r + m) * 255),
-        g: Math.round((g + m) * 255),
-        b: Math.round((b + m) * 255)
-      };
+      const saturation = 1.0;
+      const lightness = 0.5;
+      return hslToRgb(hue, saturation, lightness);
     };
   
     // ---------- Global time & economy ----------
@@ -408,7 +442,14 @@ import { collectResource } from './src/systems/resourceSystem.js';
         const L = Links[i];
         const a = getBundleById(L.aId);
         const b = getBundleById(L.bId);
-        if (!a || !b || !a.alive || !b.alive) { Links.splice(i, 1); continue; }
+        if (!a || !b || !a.alive || !b.alive) {
+          // Link broken due to death - track lifetime if collecting baseline
+          if (isCollectingBaseline && baselineMetricsTracker && L.age > 0) {
+            baselineMetricsTracker.onLinkBreak(L.age);
+          }
+          Links.splice(i, 1);
+          continue;
+        }
         // χ maintenance proportional to strength
         const leak = CONFIG.link.maintPerSec * L.strength * dt;
         a.chi = Math.max(0, a.chi - leak);
@@ -441,7 +482,14 @@ import { collectResource } from './src/systems/resourceSystem.js';
           b.emitSignal('bond', bondSignal, { cap: 1 });
         }
         // clamp and breakage
-        if (L.strength < CONFIG.link.minStrength) { Links.splice(i, 1); continue; }
+        if (L.strength < CONFIG.link.minStrength) {
+          // Link broken due to weakness - track lifetime if collecting baseline
+          if (isCollectingBaseline && baselineMetricsTracker && L.age > 0) {
+            baselineMetricsTracker.onLinkBreak(L.age);
+          }
+          Links.splice(i, 1);
+          continue;
+        }
         L.strength = Math.min(2.0, Math.max(0, L.strength));
         L.age += dt;
       }
@@ -453,7 +501,7 @@ import { collectResource } from './src/systems/resourceSystem.js';
         const a = getBundleById(L.aId);
         const b = getBundleById(L.bId);
         if (!a || !b) continue;
-        const depBase = CONFIG.depositPerSec * 0.01 * L.strength * dt; // Reduced from 0.1 to 0.01
+        const depBase = CONFIG.depositPerSec * 0.1 * L.strength * dt;
         for (let s = 0; s <= samples; s++) {
           const t = s / samples;
           const x = a.x + (b.x - a.x) * t;
@@ -466,6 +514,10 @@ import { collectResource } from './src/systems/resourceSystem.js';
     // ---------- Learning System ----------
     const learner = new CEMLearner(23, 3); // 23 obs dims (was 15, now includes scent+density), 3 action dims
     const episodeManager = new EpisodeManager();
+    
+    // ---------- Baseline Metrics Tracker ----------
+    let baselineMetricsTracker = null;
+    let isCollectingBaseline = false;
   
     // ---------- Trail field (downsampled) ----------
     const Trail = {
@@ -474,12 +526,23 @@ import { collectResource } from './src/systems/resourceSystem.js';
       authorBuf: null, authorSnapshot: null,
       timestampBuf: null, timestampSnapshot: null,
       img: null, offscreen: null,
+      offscreenCtx: null,
   
       resize() {
+        // Preserve old dimensions and buffers
+        const oldW = this.w;
+        const oldH = this.h;
+        const oldBuf = this.buf;
+        const oldAuthorBuf = this.authorBuf;
+        const oldTimestampBuf = this.timestampBuf;
+        
+        // Calculate new dimensions
         this.cell = CONFIG.trailCell;
         this.w = Math.max(1, Math.floor(canvasWidth  / this.cell));
         this.h = Math.max(1, Math.floor(canvasHeight / this.cell));
         const len = this.w * this.h;
+        
+        // Create new buffers
         this.buf = new Float32Array(len);
         this.tmp = new Float32Array(len);
         this.snapshot = new Float32Array(len);
@@ -491,6 +554,22 @@ import { collectResource } from './src/systems/resourceSystem.js';
         this.offscreen = document.createElement('canvas');
         this.offscreen.width = this.w;
         this.offscreen.height = this.h;
+        this.offscreenCtx = this.offscreen.getContext('2d');
+        
+        // Copy old data to new buffers (best effort)
+        if (oldBuf && oldW > 0 && oldH > 0) {
+          const copyW = Math.min(oldW, this.w);
+          const copyH = Math.min(oldH, this.h);
+          for (let y = 0; y < copyH; y++) {
+            for (let x = 0; x < copyW; x++) {
+              const oldIdx = y * oldW + x;
+              const newIdx = y * this.w + x;
+              this.buf[newIdx] = oldBuf[oldIdx];
+              if (oldAuthorBuf) this.authorBuf[newIdx] = oldAuthorBuf[oldIdx];
+              if (oldTimestampBuf) this.timestampBuf[newIdx] = oldTimestampBuf[oldIdx];
+            }
+          }
+        }
       },
       clear() {
         if (this.buf) this.buf.fill(0);
@@ -570,34 +649,75 @@ import { collectResource } from './src/systems/resourceSystem.js';
       draw() {
         if (!CONFIG.renderTrail || !this.buf || !this.offscreen) return;
         const data = this.img.data;
-        
+
         for (let i = 0; i < this.buf.length; i++) {
           const v = this.buf[i];                 // 0..1
           const authorId = this.authorBuf[i];
-          const intensity = Math.floor(Math.pow(v, 0.6) * 255);
+          const baseStrength = Math.pow(v, 0.55);
+          const glowStrength = Math.pow(v, 0.85);
+          const highlightStrength = Math.pow(v, 1.35);
           const o = i * 4;
-          
+
           // Get color based on author using dynamic color function
           // Neutral deposits (authorId===0) use a subtle gray to avoid overpowering
           const color = authorId !== 0 ? getAgentColorRGB(authorId) : { r: 140, g: 140, b: 140 };
-          
-          data[o+0] = Math.floor(color.r * intensity / 255);
-          data[o+1] = Math.floor(color.g * intensity / 255);
-          data[o+2] = Math.floor(color.b * intensity / 255);
-          data[o+3] = Math.min(255, intensity * 1.5);
+          const highlightedColor = {
+            r: Math.min(255, color.r + (255 - color.r) * highlightStrength * 0.45),
+            g: Math.min(255, color.g + (255 - color.g) * highlightStrength * 0.45),
+            b: Math.min(255, color.b + (255 - color.b) * highlightStrength * 0.45)
+          };
+
+          data[o+0] = Math.floor(highlightedColor.r * baseStrength);
+          data[o+1] = Math.floor(highlightedColor.g * baseStrength);
+          data[o+2] = Math.floor(highlightedColor.b * baseStrength);
+          data[o+3] = Math.min(255, glowStrength * 210 + highlightStrength * 45);
         }
-        const octx = this.offscreen.getContext('2d');
+
+        const octx = this.offscreenCtx || (this.offscreenCtx = this.offscreen.getContext('2d'));
+        if (!octx) return;
         octx.putImageData(this.img, 0, 0);
-  
+
+        const destW = this.w * this.cell;
+        const destH = this.h * this.cell;
+        const blurPx = Math.max(1.5, this.cell * 0.85);
+        const outerPad = Math.max(this.cell * 0.8, 2);
+        const midBlur = Math.max(0.75, this.cell * 0.45);
+
         ctx.save();
-        ctx.imageSmoothingEnabled = false;
         ctx.globalCompositeOperation = "lighter";
+        ctx.imageSmoothingEnabled = true;
+
+        ctx.filter = `blur(${blurPx.toFixed(2)}px)`;
+        ctx.globalAlpha = 0.55;
         ctx.drawImage(
           this.offscreen,
           0, 0, this.w, this.h,
-          0, 0, this.w * this.cell, this.h * this.cell
+          -outerPad, -outerPad,
+          destW + outerPad * 2,
+          destH + outerPad * 2
         );
-        ctx.globalCompositeOperation = "source-over";
+
+        ctx.filter = `blur(${midBlur.toFixed(2)}px)`;
+        ctx.globalAlpha = 0.35;
+        ctx.drawImage(
+          this.offscreen,
+          0, 0, this.w, this.h,
+          -this.cell * 0.4,
+          -this.cell * 0.4,
+          destW + this.cell * 0.8,
+          destH + this.cell * 0.8
+        );
+
+        ctx.filter = 'none';
+        ctx.globalAlpha = 0.9;
+        ctx.drawImage(
+          this.offscreen,
+          0, 0, this.w, this.h,
+          0, 0, destW, destH
+        );
+
+        ctx.globalAlpha = 1;
+        ctx.filter = 'none';
         ctx.restore();
       }
     };
@@ -622,6 +742,7 @@ import { collectResource } from './src/systems/resourceSystem.js';
       if (CONFIG.plantEcology.enabled && typeof FertilityGrid !== 'undefined') {
         FertilityField = new FertilityGrid(width, height);
       }
+      pixiApp.renderer.resize(width, height);
     });
 
     // Now that Trail is defined, call initial resize
@@ -657,6 +778,8 @@ import { collectResource } from './src/systems/resourceSystem.js';
       provokeBondedExploration,
       getAgentColor,
       getAgentColorRGB,
+      getAgentTrailsContainer: () => agentTrailsContainer,
+      getAgentsContainer: () => agentsContainer,
       getWorld: () => World  // Callback pattern - World is referenced later when needed
     });
     const terrainHeightFn = typeof getTerrainHeight === 'function'
@@ -671,7 +794,8 @@ import { collectResource } from './src/systems/resourceSystem.js';
       getRule110Stepper: () => (typeof window !== 'undefined' ? window.rule110Stepper : null),
       getTerrainHeight: terrainHeightFn,
       getViewportWidth: () => innerWidth,
-      getViewportHeight: () => innerHeight
+      getViewportHeight: () => innerHeight,
+      getResourcesContainer: () => resourcesContainer
     });
   
     // ========================================================================
@@ -743,12 +867,29 @@ import { collectResource } from './src/systems/resourceSystem.js';
     const originalWorldReset = World.reset.bind(World);
     World.reset = (...args) => {
       setWorldPaused(false);
+      
+      // Clear PixiJS containers to remove any lingering graphics
+      if (resourcesContainer) {
+        resourcesContainer.removeChildren();
+      }
+      if (agentsContainer) {
+        agentsContainer.removeChildren();
+      }
+      if (agentTrailsContainer) {
+        agentTrailsContainer.removeChildren();
+      }
+      
       const result = originalWorldReset(...args);
+      
       if (ParticipationManager && typeof ParticipationManager.resetState === 'function') {
         updateParticipationStatusUI();
       } else {
         resetParticipationEnergy({ reason: 'world-reset', clearFields: true });
       }
+      
+      // Force a render to clear any remaining artifacts
+      pixiApp.render();
+      
       return result;
     };
 
@@ -757,6 +898,56 @@ import { collectResource } from './src/systems/resourceSystem.js';
     // Expose World globally for console access
     if (typeof window !== 'undefined') {
       window.World = World;
+      window.Trail = Trail;
+      window.SignalField = SignalField;
+      window.FertilityField = FertilityField; // May be null if plant ecology disabled
+      window.FertilityGrid = FertilityGrid; // Expose class so config can recreate field
+    }
+
+    // ---------- Baseline Collection Functions ----------
+    function startBaselineCollection() {
+      if (isCollectingBaseline) {
+        console.warn('Baseline collection already in progress');
+        return false;
+      }
+      
+      try {
+        baselineMetricsTracker = new MetricsTracker();
+        baselineMetricsTracker.init(World, Trail, globalTick);
+        isCollectingBaseline = true;
+        
+        console.log('📊 Started baseline metrics collection');
+        console.log('   Tracker initialized:', !!baselineMetricsTracker);
+        console.log('   Step method exists:', typeof baselineMetricsTracker.step);
+        return true;
+      } catch (err) {
+        console.error('Failed to start baseline collection:', err);
+        baselineMetricsTracker = null;
+        isCollectingBaseline = false;
+        return false;
+      }
+    }
+    
+    function stopBaselineCollection() {
+      if (!isCollectingBaseline) {
+        console.warn('No baseline collection in progress');
+        return false;
+      }
+      
+      isCollectingBaseline = false;
+      console.log(`📊 Stopped baseline metrics collection (${baselineMetricsTracker?.hist?.length || 0} snapshots)`);
+      return true;
+    }
+    
+    function getBaselineMetrics() {
+      if (!baselineMetricsTracker) {
+        return null;
+      }
+      return baselineMetricsTracker.getHistory();
+    }
+    
+    function isBaselineCollecting() {
+      return isCollectingBaseline;
     }
 
     // ========================================================================
@@ -788,7 +979,12 @@ import { collectResource } from './src/systems/resourceSystem.js';
         } else {
           World.bundles.forEach((b) => (b.useController = false));
         }
-      }
+      },
+      // Baseline metrics collection
+      startBaselineCollection,
+      stopBaselineCollection,
+      getBaselineMetrics,
+      isBaselineCollecting
     });
   
     // ---------- Lineage Visualization ----------
@@ -1300,9 +1496,29 @@ import { collectResource } from './src/systems/resourceSystem.js';
       }
 
       let totalEnergyDelta = 0;
+      let totalChiSpent = 0;
+      
       World.bundles.forEach((bundle) => {
+        const chiBeforeUpdate = bundle.chi;
+        const posBeforeUpdate = { x: bundle.x, y: bundle.y };
+        
         const nearestResource = World.getNearestResource(bundle);
         bundle.update(dt, nearestResource);
+        
+        // Track baseline metrics if collecting
+        if (isCollectingBaseline && baselineMetricsTracker) {
+          const dx = bundle.x - posBeforeUpdate.x;
+          const dy = bundle.y - posBeforeUpdate.y;
+          const speed = Math.hypot(dx, dy) / dt;
+          baselineMetricsTracker.onMove(dx, dy, speed);
+          
+          const chiSpent = Math.max(0, chiBeforeUpdate - bundle.chi);
+          if (chiSpent > 0) {
+            baselineMetricsTracker.onChiSpend(chiSpent, 'play-mode');
+            totalChiSpent += chiSpent;
+          }
+        }
+        
         const applied = applyParticipationEnergy(bundle);
         if (applied !== 0) {
           totalEnergyDelta += applied;
@@ -1331,7 +1547,7 @@ import { collectResource } from './src/systems/resourceSystem.js';
         SignalField.step(dt);
       }
 
-      reinforceLinks(dt);
+      // reinforceLinks(dt); // Disabled: Link/Bond trail deposits (was grey)
       World.updateEcology(dt);
 
       if (CONFIG.scentGradient.consumable) {
@@ -1422,6 +1638,23 @@ import { collectResource } from './src/systems/resourceSystem.js';
               if (CONFIG.plantEcology.enabled && FertilityField) {
                 FertilityField.depleteAt(resource.x, resource.y, globalTick);
               }
+              
+              // Track baseline metrics if collecting
+              if (isCollectingBaseline && baselineMetricsTracker) {
+                const rewardAmount = CONFIG.rewardChi || 0;
+                baselineMetricsTracker.onChiReward(rewardAmount, 'resource', globalTick);
+                
+                // Track guidance efficacy (was agent near strong trail?)
+                const sample = Trail.sample(bundle.x, bundle.y);
+                const nearTrail = sample.value > 0.15; // Strong trail threshold
+                baselineMetricsTracker.onResourceFound(nearTrail);
+                
+                // Track chi from reuse (provenance credits)
+                const provenanceCredit = Ledger.getCredits(bundle.id);
+                if (provenanceCredit > 0) {
+                  baselineMetricsTracker.onChiFromReuse(provenanceCredit);
+                }
+              }
             },
           });
 
@@ -1453,7 +1686,8 @@ import { collectResource } from './src/systems/resourceSystem.js';
 
         if (World.resources.length > maxResources) {
           const excess = World.resources.length - maxResources;
-          World.resources.splice(-excess, excess);
+          const removed = World.resources.splice(-excess, excess);
+          removed.forEach(res => res.destroy());
           console.log(`🔪 Culled ${excess} excess resources due to competition (${aliveCount} agents)`);
         }
 
@@ -1508,6 +1742,7 @@ import { collectResource } from './src/systems/resourceSystem.js';
           const idx = toRemove[i];
           if (idx >= 0 && idx < World.bundles.length) {
             const removed = World.bundles.splice(idx, 1)[0];
+            removed.destroy();
             console.log(`💀 Agent ${removed.id} fully decayed and removed | Pop: ${World.bundles.length}`);
           }
         }
@@ -1521,6 +1756,23 @@ import { collectResource } from './src/systems/resourceSystem.js';
         TcScheduler.runPhase('commit', tickContext);
       }
       globalTick += 1;
+      
+      // Update baseline metrics if collecting
+      if (isCollectingBaseline && baselineMetricsTracker) {
+        try {
+          if (typeof baselineMetricsTracker.step === 'function') {
+            // Pass Links array for active link age tracking
+            baselineMetricsTracker.step(World, Trail, globalTick, Links);
+          } else {
+            console.error('baselineMetricsTracker.step is not a function, stopping collection');
+            isCollectingBaseline = false;
+          }
+        } catch (err) {
+          console.error('Error updating baseline metrics:', err);
+          isCollectingBaseline = false;
+        }
+      }
+      
       if (globalTick - lastSignalStatTick >= 30) {
         lastSignalStatTick = globalTick;
         const fieldStats = typeof SignalField.getStats === 'function' ? SignalField.getStats() : null;
@@ -1558,16 +1810,17 @@ import { collectResource } from './src/systems/resourceSystem.js';
         FertilityField.draw(ctx);
       }
 
+      if (inputState.showScentGradient && CONFIG.scentGradient.enabled) {
+        visualizeScentHeatmap(ctx, World.resources, 40);
+        visualizeScentGradient(ctx, World.resources, 80);
+      }
+
       if (CONFIG.signal.enabled) {
         SignalField.draw(ctx);
       }
       Trail.draw();
 
-      World.resources.forEach((res) => {
-        if (res.visible) {
-          res.draw(ctx);
-        }
-      });
+      World.resources.forEach((res) => res.draw());
 
       if (ParticipationManager && typeof ParticipationManager.draw === 'function') {
         try {
@@ -1602,13 +1855,17 @@ import { collectResource } from './src/systems/resourceSystem.js';
         drawLineageLinks(ctx);
       }
 
-      World.bundles.forEach((bundle) => bundle.draw(ctx));
+      World.bundles.forEach((bundle) => bundle.draw());
 
       drawHUD();
 
       if (CONFIG.tcResourceIntegration?.showOverlay && window.rule110Stepper) {
         drawRule110Overlay(ctx, window.rule110Stepper, canvasWidth, canvasHeight);
       }
+
+      // Draw the PixiJS stage
+      pixiApp.render();
+      ctx.drawImage(pixiApp.view, 0, 0);
     };
 
     startSimulation({
