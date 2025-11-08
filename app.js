@@ -44,6 +44,19 @@ import { collectResource } from './src/systems/resourceSystem.js';
 (() => {
     const canvas = document.getElementById("view");
     const ctx = canvas.getContext("2d", { alpha: false, desynchronized: true });
+
+    // ---------- PixiJS Integration ----------
+    const pixiApp = new PIXI.Application({
+        width: innerWidth,
+        height: innerHeight,
+        backgroundAlpha: 0,
+        resolution: window.devicePixelRatio || 1,
+        autoDensity: true,
+    });
+    const resourcesContainer = new PIXI.Container();
+    pixiApp.stage.addChild(resourcesContainer);
+    window.pixiApp = pixiApp; // For debugging
+    window.resourcesContainer = resourcesContainer; // For debugging
   
     // ---------- DPR-aware sizing ----------
     let dpr = 1;
@@ -647,6 +660,7 @@ import { collectResource } from './src/systems/resourceSystem.js';
       if (CONFIG.plantEcology.enabled && typeof FertilityGrid !== 'undefined') {
         FertilityField = new FertilityGrid(width, height);
       }
+      pixiApp.renderer.resize(width, height);
     });
 
     // Now that Trail is defined, call initial resize
@@ -1597,11 +1611,7 @@ import { collectResource } from './src/systems/resourceSystem.js';
       }
       Trail.draw();
 
-      World.resources.forEach((res) => {
-        if (res.visible) {
-          res.draw(ctx);
-        }
-      });
+      World.resources.forEach((res) => res.draw());
 
       if (ParticipationManager && typeof ParticipationManager.draw === 'function') {
         try {
@@ -1643,6 +1653,9 @@ import { collectResource } from './src/systems/resourceSystem.js';
       if (CONFIG.tcResourceIntegration?.showOverlay && window.rule110Stepper) {
         drawRule110Overlay(ctx, window.rule110Stepper, canvasWidth, canvasHeight);
       }
+
+      // Draw the PixiJS stage
+      ctx.drawImage(pixiApp.view, 0, 0);
     };
 
     startSimulation({
