@@ -239,34 +239,76 @@ export const SignalField = {
     const palette = CHANNEL_COLORS;
 
     for (let i = 0; i < len; i++) {
-      let r = 0, g = 0, b = 0, a = 0;
+      let r = 0, g = 0, b = 0, a = 0, glow = 0;
       for (let c = 0; c < this.channelCount; c++) {
         const value = this.buffers[c][i];
         if (value <= 0) continue;
-        const strength = Math.pow(clamp01(value), 0.7);
+        const normalized = clamp01(value);
+        const strength = Math.pow(normalized, 0.65);
+        const highlight = Math.pow(normalized, 1.25);
         const color = palette[c % palette.length];
         r += color[0] * strength;
         g += color[1] * strength;
         b += color[2] * strength;
         a += strength;
+        glow += highlight;
       }
+      const brightness = 1 + glow * 0.35;
       const o = i * 4;
-      data[o + 0] = Math.min(255, r);
-      data[o + 1] = Math.min(255, g);
-      data[o + 2] = Math.min(255, b);
-      data[o + 3] = Math.min(255, a * 180);
+      data[o + 0] = Math.min(255, r * brightness);
+      data[o + 1] = Math.min(255, g * brightness);
+      data[o + 2] = Math.min(255, b * brightness);
+      data[o + 3] = Math.min(255, a * 160 + glow * 120);
     }
+
+    if (!this.offscreenCtx) {
+      this.offscreenCtx = this.offscreen.getContext('2d');
+    }
+    if (!this.offscreenCtx) return;
 
     this.offscreenCtx.putImageData(this.img, 0, 0);
 
+    const destW = this.w * this.cell;
+    const destH = this.h * this.cell;
+    const haloBlur = Math.max(2.5, this.cell * 1.4);
+    const glowBlur = Math.max(1.25, this.cell * 0.75);
+    const haloPad = Math.max(this.cell, 6);
+
     ctx.save();
-    ctx.imageSmoothingEnabled = false;
     ctx.globalCompositeOperation = 'lighter';
+    ctx.imageSmoothingEnabled = true;
+
+    ctx.filter = `blur(${haloBlur.toFixed(2)}px)`;
+    ctx.globalAlpha = 0.4;
     ctx.drawImage(
       this.offscreen,
       0, 0, this.w, this.h,
-      0, 0, this.w * this.cell, this.h * this.cell
+      -haloPad, -haloPad,
+      destW + haloPad * 2,
+      destH + haloPad * 2
     );
+
+    ctx.filter = `blur(${glowBlur.toFixed(2)}px)`;
+    ctx.globalAlpha = 0.75;
+    ctx.drawImage(
+      this.offscreen,
+      0, 0, this.w, this.h,
+      -this.cell * 0.5,
+      -this.cell * 0.5,
+      destW + this.cell,
+      destH + this.cell
+    );
+
+    ctx.filter = 'none';
+    ctx.globalAlpha = 0.95;
+    ctx.drawImage(
+      this.offscreen,
+      0, 0, this.w, this.h,
+      0, 0, destW, destH
+    );
+
+    ctx.globalAlpha = 1;
+    ctx.filter = 'none';
     ctx.restore();
   },
 

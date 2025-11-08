@@ -56,11 +56,14 @@ import { collectResource } from './src/systems/resourceSystem.js';
     });
     const resourcesContainer = new PIXI.Container();
     pixiApp.stage.addChild(resourcesContainer);
+    const agentTrailsContainer = new PIXI.Container();
+    pixiApp.stage.addChild(agentTrailsContainer);
     const agentsContainer = new PIXI.Container();
     pixiApp.stage.addChild(agentsContainer);
     window.pixiApp = pixiApp; // For debugging
     window.resourcesContainer = resourcesContainer; // For debugging
     window.agentsContainer = agentsContainer; // For debugging
+    window.agentTrailsContainer = agentTrailsContainer; // For debugging
   
     // ---------- DPR-aware sizing ----------
     let dpr = 1;
@@ -285,6 +288,31 @@ import { collectResource } from './src/systems/resourceSystem.js';
     }
 
     // Generate color for agent based on ID (supports unlimited agents)
+    const hslToRgb = (hue, saturation, lightness) => {
+      const s = saturation;
+      const l = lightness;
+
+      const c = (1 - Math.abs(2 * l - 1)) * s;
+      const x = c * (1 - Math.abs((hue / 60) % 2 - 1));
+      const m = l - c / 2;
+
+      let r, g, b;
+      if (hue < 60) { r = c; g = x; b = 0; }
+      else if (hue < 120) { r = x; g = c; b = 0; }
+      else if (hue < 180) { r = 0; g = c; b = x; }
+      else if (hue < 240) { r = 0; g = x; b = c; }
+      else if (hue < 300) { r = x; g = 0; b = c; }
+      else { r = c; g = 0; b = x; }
+
+      return {
+        r: Math.round((r + m) * 255),
+        g: Math.round((g + m) * 255),
+        b: Math.round((b + m) * 255)
+      };
+    };
+
+    const rgbToHexString = ({ r, g, b }) => `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+
     const getAgentColor = (id, alive = true) => {
       // First 4 agents use classic colors for consistency
       const classicColors = {
@@ -293,18 +321,19 @@ import { collectResource } from './src/systems/resourceSystem.js';
         3: { alive: "#ffff00", dead: "#555500" },  // yellow
         4: { alive: "#ff8800", dead: "#553300" },  // orange
       };
-      
+
       if (id <= 4 && classicColors[id]) {
         return alive ? classicColors[id].alive : classicColors[id].dead;
       }
-      
-      // For agents beyond 4, use HSL with varying hue
+
+      // For agents beyond 4, use HSL with varying hue converted to hex
       const hue = ((id - 1) * 137.5) % 360; // Golden angle for good distribution
-      const saturation = alive ? 100 : 30;
-      const lightness = alive ? 50 : 20;
-      return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+      const saturation = alive ? 1.0 : 0.3;
+      const lightness = alive ? 0.5 : 0.2;
+      const rgb = hslToRgb(hue, saturation, lightness);
+      return rgbToHexString(rgb);
     };
-    
+
     // Get RGB values for trail rendering
     const getAgentColorRGB = (id) => {
       // First 4 use classic RGB
@@ -314,33 +343,15 @@ import { collectResource } from './src/systems/resourceSystem.js';
         3: { r: 255, g: 255, b: 0 },    // yellow
         4: { r: 255, g: 136, b: 0 }     // orange
       };
-      
+
       if (id <= 4 && classicRGB[id]) {
         return classicRGB[id];
       }
-      
-      // Convert HSL to RGB for agents beyond 4
+
       const hue = ((id - 1) * 137.5) % 360;
-      const s = 1.0;
-      const l = 0.5;
-      
-      const c = (1 - Math.abs(2 * l - 1)) * s;
-      const x = c * (1 - Math.abs((hue / 60) % 2 - 1));
-      const m = l - c / 2;
-      
-      let r, g, b;
-      if (hue < 60) { r = c; g = x; b = 0; }
-      else if (hue < 120) { r = x; g = c; b = 0; }
-      else if (hue < 180) { r = 0; g = c; b = x; }
-      else if (hue < 240) { r = 0; g = x; b = c; }
-      else if (hue < 300) { r = x; g = 0; b = c; }
-      else { r = c; g = 0; b = x; }
-      
-      return {
-        r: Math.round((r + m) * 255),
-        g: Math.round((g + m) * 255),
-        b: Math.round((b + m) * 255)
-      };
+      const saturation = 1.0;
+      const lightness = 0.5;
+      return hslToRgb(hue, saturation, lightness);
     };
   
     // ---------- Global time & economy ----------
@@ -491,6 +502,7 @@ import { collectResource } from './src/systems/resourceSystem.js';
       authorBuf: null, authorSnapshot: null,
       timestampBuf: null, timestampSnapshot: null,
       img: null, offscreen: null,
+      offscreenCtx: null,
   
       resize() {
         // Preserve old dimensions and buffers
@@ -518,6 +530,7 @@ import { collectResource } from './src/systems/resourceSystem.js';
         this.offscreen = document.createElement('canvas');
         this.offscreen.width = this.w;
         this.offscreen.height = this.h;
+        this.offscreenCtx = this.offscreen.getContext('2d');
         
         // Copy old data to new buffers (best effort)
         if (oldBuf && oldW > 0 && oldH > 0) {
@@ -612,34 +625,75 @@ import { collectResource } from './src/systems/resourceSystem.js';
       draw() {
         if (!CONFIG.renderTrail || !this.buf || !this.offscreen) return;
         const data = this.img.data;
-        
+
         for (let i = 0; i < this.buf.length; i++) {
           const v = this.buf[i];                 // 0..1
           const authorId = this.authorBuf[i];
-          const intensity = Math.floor(Math.pow(v, 0.6) * 255);
+          const baseStrength = Math.pow(v, 0.55);
+          const glowStrength = Math.pow(v, 0.85);
+          const highlightStrength = Math.pow(v, 1.35);
           const o = i * 4;
-          
+
           // Get color based on author using dynamic color function
           // Neutral deposits (authorId===0) use a subtle gray to avoid overpowering
           const color = authorId !== 0 ? getAgentColorRGB(authorId) : { r: 140, g: 140, b: 140 };
-          
-          data[o+0] = Math.floor(color.r * intensity / 255);
-          data[o+1] = Math.floor(color.g * intensity / 255);
-          data[o+2] = Math.floor(color.b * intensity / 255);
-          data[o+3] = Math.min(255, intensity * 1.5);
+          const highlightedColor = {
+            r: Math.min(255, color.r + (255 - color.r) * highlightStrength * 0.45),
+            g: Math.min(255, color.g + (255 - color.g) * highlightStrength * 0.45),
+            b: Math.min(255, color.b + (255 - color.b) * highlightStrength * 0.45)
+          };
+
+          data[o+0] = Math.floor(highlightedColor.r * baseStrength);
+          data[o+1] = Math.floor(highlightedColor.g * baseStrength);
+          data[o+2] = Math.floor(highlightedColor.b * baseStrength);
+          data[o+3] = Math.min(255, glowStrength * 210 + highlightStrength * 45);
         }
-        const octx = this.offscreen.getContext('2d');
+
+        const octx = this.offscreenCtx || (this.offscreenCtx = this.offscreen.getContext('2d'));
+        if (!octx) return;
         octx.putImageData(this.img, 0, 0);
-  
+
+        const destW = this.w * this.cell;
+        const destH = this.h * this.cell;
+        const blurPx = Math.max(1.5, this.cell * 0.85);
+        const outerPad = Math.max(this.cell * 0.8, 2);
+        const midBlur = Math.max(0.75, this.cell * 0.45);
+
         ctx.save();
-        ctx.imageSmoothingEnabled = false;
         ctx.globalCompositeOperation = "lighter";
+        ctx.imageSmoothingEnabled = true;
+
+        ctx.filter = `blur(${blurPx.toFixed(2)}px)`;
+        ctx.globalAlpha = 0.55;
         ctx.drawImage(
           this.offscreen,
           0, 0, this.w, this.h,
-          0, 0, this.w * this.cell, this.h * this.cell
+          -outerPad, -outerPad,
+          destW + outerPad * 2,
+          destH + outerPad * 2
         );
-        ctx.globalCompositeOperation = "source-over";
+
+        ctx.filter = `blur(${midBlur.toFixed(2)}px)`;
+        ctx.globalAlpha = 0.35;
+        ctx.drawImage(
+          this.offscreen,
+          0, 0, this.w, this.h,
+          -this.cell * 0.4,
+          -this.cell * 0.4,
+          destW + this.cell * 0.8,
+          destH + this.cell * 0.8
+        );
+
+        ctx.filter = 'none';
+        ctx.globalAlpha = 0.9;
+        ctx.drawImage(
+          this.offscreen,
+          0, 0, this.w, this.h,
+          0, 0, destW, destH
+        );
+
+        ctx.globalAlpha = 1;
+        ctx.filter = 'none';
         ctx.restore();
       }
     };
@@ -700,6 +754,7 @@ import { collectResource } from './src/systems/resourceSystem.js';
       provokeBondedExploration,
       getAgentColor,
       getAgentColorRGB,
+      agentTrailsContainer,
       getWorld: () => World  // Callback pattern - World is referenced later when needed
     });
     const terrainHeightFn = typeof getTerrainHeight === 'function'
