@@ -77,15 +77,20 @@ import { MetricsTracker } from './src/core/metricsTracker.js';
     let canvasHeight = innerHeight;
 
     const getAvailableSize = () => {
+      const viewport = typeof window !== 'undefined' ? window.visualViewport : null;
+      const viewportWidth = viewport ? Math.floor(viewport.width) : innerWidth;
+      const viewportHeight = viewport ? Math.floor(viewport.height) : innerHeight;
+
       const configPanel = document.getElementById("config-panel");
       const panelOpen = configPanel && configPanel.style.display !== "none";
-      const panelWidth = panelOpen ? 360 : 0; // Config panel width
-      // Canvas now fills full viewport, HUD/Dashboard are drawn on top
+      const maxPanelWidth = panelOpen ? 360 : 0; // Config panel width when space permits
+      const availableWidth = Math.max(0, viewportWidth - 80);
+      const panelWidth = panelOpen ? Math.min(maxPanelWidth, availableWidth) : 0;
 
       return {
-        width: innerWidth - panelWidth,
-        height: innerHeight,
-        panelWidth: panelWidth,
+        width: Math.max(0, viewportWidth - panelWidth),
+        height: viewportHeight,
+        panelWidth,
         topReserve: 0
       };
     };
