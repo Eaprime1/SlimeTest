@@ -73,58 +73,55 @@ export function createResourceClass(context) {
       this.scentStrength = CONFIG.scentGradient.strength;
       this.scentRange = CONFIG.scentGradient.maxRange;
       this.tcData = null;
+
+      this.graphics = new PIXI.Graphics();
+      resourcesContainer.addChild(this.graphics);
     }
 
-    draw(ctx) {
-      // Don't draw if on cooldown (invisible)
-      if (!this.visible) return;
+    draw() {
+        this.graphics.clear();
+        this.graphics.visible = this.visible;
 
-      ctx.beginPath();
-      ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
+        if (!this.visible) {
+            return;
+        }
 
-      // Color based on local fertility if plant ecology enabled
-      const field = fertilityField();
-      if (CONFIG.plantEcology.enabled && field) {
-        const fertility = field.sampleAt(this.x, this.y);
-        const brightness = Math.floor(155 + fertility * 100);
-        ctx.fillStyle = `rgb(0, ${brightness}, 88)`;
-      } else {
-        ctx.fillStyle = '#00ff88';
-      }
+        this.graphics.x = this.x;
+        this.graphics.y = this.y;
 
-      ctx.fill();
+        // Color based on local fertility if plant ecology enabled
+        const field = fertilityField();
+        let color = 0x00ff88; // Default color
+        if (CONFIG.plantEcology.enabled && field) {
+            const fertility = field.sampleAt(this.x, this.y);
+            const brightness = Math.floor(155 + fertility * 100);
+            color = (brightness << 8) | 88;
+        }
 
-      // Optional: Show young resources with a glow (recently sprouted)
-      if (CONFIG.plantEcology.enabled && this.age < 60) {
-        ctx.save();
-        ctx.strokeStyle = `rgba(0, 255, 136, ${1 - this.age / 60})`;
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(this.x, this.y, this.r + 4, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.restore();
-      }
+        this.graphics.beginFill(color);
+        this.graphics.drawCircle(0, 0, this.r);
+        this.graphics.endFill();
 
-      // Subtle scent gradient indicator
-      if (CONFIG.scentGradient.enabled && CONFIG.scentGradient.showSubtleIndicator) {
-        const pulse = (Math.sin(currentTick() * 0.05) + 1) / 2; // 0..1
+        // Optional: Show young resources with a glow (recently sprouted)
+        if (CONFIG.plantEcology.enabled && this.age < 60) {
+            const alpha = 1 - this.age / 60;
+            this.graphics.lineStyle(2, 0x00ff88, alpha);
+            this.graphics.drawCircle(0, 0, this.r + 4);
+        }
 
-        ctx.save();
-        ctx.strokeStyle = `rgba(0, 255, 136, ${0.1 + pulse * 0.2})`;
-        ctx.lineWidth = 1;
+        // Subtle scent gradient indicator
+        if (CONFIG.scentGradient.enabled && CONFIG.scentGradient.showSubtleIndicator) {
+            const pulse = (Math.sin(currentTick() * 0.05) + 1) / 2; // 0..1
+            const alpha = 0.1 + pulse * 0.2;
 
-        // Ring 1
-        ctx.beginPath();
-        ctx.arc(this.x, this.y, this.r + 10 + pulse * 10, 0, Math.PI * 2);
-        ctx.stroke();
+            this.graphics.lineStyle(1, 0x00ff88, alpha);
 
-        // Ring 2
-        ctx.beginPath();
-        ctx.arc(this.x, this.y, this.r + 30 + pulse * 20, 0, Math.PI * 2);
-        ctx.stroke();
+            // Ring 1
+            this.graphics.drawCircle(0, 0, this.r + 10 + pulse * 10);
 
-        ctx.restore();
-      }
+            // Ring 2
+            this.graphics.drawCircle(0, 0, this.r + 30 + pulse * 20);
+        }
     }
 
     respawn() {
@@ -191,6 +188,10 @@ export function createResourceClass(context) {
     update(dt) {
       this.age++;
       this.updateCooldown();
+    }
+
+    destroy() {
+        this.graphics.destroy();
     }
   };
 }

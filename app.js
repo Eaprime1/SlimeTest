@@ -45,6 +45,26 @@ import { MetricsTracker } from './src/core/metricsTracker.js';
 (() => {
     const canvas = document.getElementById("view");
     const ctx = canvas.getContext("2d", { alpha: false, desynchronized: true });
+
+    // ---------- PixiJS Integration ----------
+    const pixiApp = new PIXI.Application({
+        width: innerWidth,
+        height: innerHeight,
+        backgroundAlpha: 0,
+        resolution: window.devicePixelRatio || 1,
+        autoDensity: true,
+        autoStart: false,
+    });
+    const resourcesContainer = new PIXI.Container();
+    pixiApp.stage.addChild(resourcesContainer);
+    const agentTrailsContainer = new PIXI.Container();
+    pixiApp.stage.addChild(agentTrailsContainer);
+    const agentsContainer = new PIXI.Container();
+    pixiApp.stage.addChild(agentsContainer);
+    window.pixiApp = pixiApp; // For debugging
+    window.resourcesContainer = resourcesContainer; // For debugging
+    window.agentsContainer = agentsContainer; // For debugging
+    window.agentTrailsContainer = agentTrailsContainer; // For debugging
   
     // ---------- DPR-aware sizing ----------
     let dpr = 1;
@@ -269,6 +289,31 @@ import { MetricsTracker } from './src/core/metricsTracker.js';
     }
 
     // Generate color for agent based on ID (supports unlimited agents)
+    const hslToRgb = (hue, saturation, lightness) => {
+      const s = saturation;
+      const l = lightness;
+
+      const c = (1 - Math.abs(2 * l - 1)) * s;
+      const x = c * (1 - Math.abs((hue / 60) % 2 - 1));
+      const m = l - c / 2;
+
+      let r, g, b;
+      if (hue < 60) { r = c; g = x; b = 0; }
+      else if (hue < 120) { r = x; g = c; b = 0; }
+      else if (hue < 180) { r = 0; g = c; b = x; }
+      else if (hue < 240) { r = 0; g = x; b = c; }
+      else if (hue < 300) { r = x; g = 0; b = c; }
+      else { r = c; g = 0; b = x; }
+
+      return {
+        r: Math.round((r + m) * 255),
+        g: Math.round((g + m) * 255),
+        b: Math.round((b + m) * 255)
+      };
+    };
+
+    const rgbToHexString = ({ r, g, b }) => `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+
     const getAgentColor = (id, alive = true) => {
       // First 4 agents use classic colors for consistency
       const classicColors = {
@@ -277,18 +322,19 @@ import { MetricsTracker } from './src/core/metricsTracker.js';
         3: { alive: "#ffff00", dead: "#555500" },  // yellow
         4: { alive: "#ff8800", dead: "#553300" },  // orange
       };
-      
+
       if (id <= 4 && classicColors[id]) {
         return alive ? classicColors[id].alive : classicColors[id].dead;
       }
-      
-      // For agents beyond 4, use HSL with varying hue
+
+      // For agents beyond 4, use HSL with varying hue converted to hex
       const hue = ((id - 1) * 137.5) % 360; // Golden angle for good distribution
-      const saturation = alive ? 100 : 30;
-      const lightness = alive ? 50 : 20;
-      return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+      const saturation = alive ? 1.0 : 0.3;
+      const lightness = alive ? 0.5 : 0.2;
+      const rgb = hslToRgb(hue, saturation, lightness);
+      return rgbToHexString(rgb);
     };
-    
+
     // Get RGB values for trail rendering
     const getAgentColorRGB = (id) => {
       // First 4 use classic RGB
@@ -298,33 +344,15 @@ import { MetricsTracker } from './src/core/metricsTracker.js';
         3: { r: 255, g: 255, b: 0 },    // yellow
         4: { r: 255, g: 136, b: 0 }     // orange
       };
-      
+
       if (id <= 4 && classicRGB[id]) {
         return classicRGB[id];
       }
-      
-      // Convert HSL to RGB for agents beyond 4
+
       const hue = ((id - 1) * 137.5) % 360;
-      const s = 1.0;
-      const l = 0.5;
-      
-      const c = (1 - Math.abs(2 * l - 1)) * s;
-      const x = c * (1 - Math.abs((hue / 60) % 2 - 1));
-      const m = l - c / 2;
-      
-      let r, g, b;
-      if (hue < 60) { r = c; g = x; b = 0; }
-      else if (hue < 120) { r = x; g = c; b = 0; }
-      else if (hue < 180) { r = 0; g = c; b = x; }
-      else if (hue < 240) { r = 0; g = x; b = c; }
-      else if (hue < 300) { r = x; g = 0; b = c; }
-      else { r = c; g = 0; b = x; }
-      
-      return {
-        r: Math.round((r + m) * 255),
-        g: Math.round((g + m) * 255),
-        b: Math.round((b + m) * 255)
-      };
+      const saturation = 1.0;
+      const lightness = 0.5;
+      return hslToRgb(hue, saturation, lightness);
     };
   
     // ---------- Global time & economy ----------
@@ -666,6 +694,7 @@ import { MetricsTracker } from './src/core/metricsTracker.js';
       if (CONFIG.plantEcology.enabled && typeof FertilityGrid !== 'undefined') {
         FertilityField = new FertilityGrid(width, height);
       }
+      pixiApp.renderer.resize(width, height);
     });
 
     // Now that Trail is defined, call initial resize
@@ -701,6 +730,7 @@ import { MetricsTracker } from './src/core/metricsTracker.js';
       provokeBondedExploration,
       getAgentColor,
       getAgentColorRGB,
+      agentTrailsContainer,
       getWorld: () => World  // Callback pattern - World is referenced later when needed
     });
     const terrainHeightFn = typeof getTerrainHeight === 'function'
@@ -1589,7 +1619,8 @@ import { MetricsTracker } from './src/core/metricsTracker.js';
 
         if (World.resources.length > maxResources) {
           const excess = World.resources.length - maxResources;
-          World.resources.splice(-excess, excess);
+          const removed = World.resources.splice(-excess, excess);
+          removed.forEach(res => res.destroy());
           console.log(`🔪 Culled ${excess} excess resources due to competition (${aliveCount} agents)`);
         }
 
@@ -1644,6 +1675,7 @@ import { MetricsTracker } from './src/core/metricsTracker.js';
           const idx = toRemove[i];
           if (idx >= 0 && idx < World.bundles.length) {
             const removed = World.bundles.splice(idx, 1)[0];
+            removed.destroy();
             console.log(`💀 Agent ${removed.id} fully decayed and removed | Pop: ${World.bundles.length}`);
           }
         }
@@ -1721,11 +1753,7 @@ import { MetricsTracker } from './src/core/metricsTracker.js';
       }
       Trail.draw();
 
-      World.resources.forEach((res) => {
-        if (res.visible) {
-          res.draw(ctx);
-        }
-      });
+      World.resources.forEach((res) => res.draw());
 
       if (ParticipationManager && typeof ParticipationManager.draw === 'function') {
         try {
@@ -1760,13 +1788,17 @@ import { MetricsTracker } from './src/core/metricsTracker.js';
         drawLineageLinks(ctx);
       }
 
-      World.bundles.forEach((bundle) => bundle.draw(ctx));
+      World.bundles.forEach((bundle) => bundle.draw());
 
       drawHUD();
 
       if (CONFIG.tcResourceIntegration?.showOverlay && window.rule110Stepper) {
         drawRule110Overlay(ctx, window.rule110Stepper, canvasWidth, canvasHeight);
       }
+
+      // Draw the PixiJS stage
+      pixiApp.render();
+      ctx.drawImage(pixiApp.view, 0, 0);
     };
 
     startSimulation({
