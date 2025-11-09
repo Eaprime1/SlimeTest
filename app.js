@@ -935,6 +935,7 @@ import {
     // Note: Bundle and Resource use getWorld: () => World callback pattern
     // This allows them to be created BEFORE World while still accessing it later
     const Bundle = createBundleClass({
+      PIXI,
       Trail,
       getGlobalTick: () => globalTick,
       getCanvasWidth: () => canvasWidth,
@@ -960,6 +961,7 @@ import {
       : undefined;
 
     const Resource = createResourceClass({
+      PIXI,
       getGlobalTick: () => globalTick,
       getCanvasWidth: () => canvasWidth,
       getCanvasHeight: () => canvasHeight,

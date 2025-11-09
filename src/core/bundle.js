@@ -30,6 +30,7 @@ function rgbToHexNumber({ r, g, b }) {
 
 export function createBundleClass(context) {
   const {
+    PIXI,
     Trail,
     getGlobalTick,
     getCanvasWidth,
