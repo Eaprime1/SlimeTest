@@ -1637,5 +1637,23 @@ import { collectResource } from './src/systems/resourceSystem.js';
     } else {
       initTrainingUI();
     }
+
+    // Initialize mobile control panel
+    const initMobileControls = () => {
+      if (typeof MobileControlPanel !== 'undefined') {
+        window.mobileControlPanel = new MobileControlPanel();
+
+        // Auto-show on mobile devices
+        if (isMobileDevice()) {
+          window.mobileControlPanel.show();
+        }
+      }
+    };
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', initMobileControls, { once: true });
+    } else {
+      initMobileControls();
+    }
   })();
   
