@@ -123,7 +123,8 @@ export class TrainingUI {
       <button id="export-baseline" style="margin: 5px 0; width: 100%;">📊 Export Baseline Metrics</button>
     `;
     this.panel.appendChild(baselineSection);
-    
+
+
     // Config Optimization section
     const configOptSection = this.createSection('Config Optimization');
     configOptSection.innerHTML += `
@@ -331,8 +332,10 @@ export class TrainingUI {
         this.callbacks.onTestConfig();
       }
     });
+
   }
-  
+
+
   // Update baseline collection status
   updateBaselineStatus(isCollecting, snapshotCount = 0) {
     const statusEl = document.getElementById('baseline-status');
@@ -545,25 +548,384 @@ export class TrainingUI {
   }
 }
 
+// Adaptive Heuristics Panel - Dedicated UI for real-time parameter learning
+export class AdaptiveHeuristicsUI {
+  constructor(container, trainingModule) {
+    this.container = container;
+    this.trainingModule = trainingModule;
+    this.panel = null;
+    this.isVisible = false;
+    this.parameterHistory = [];
+    this.maxHistoryPoints = 100;
+
+    this.createUI();
+    this.startPeriodicUpdates();
+  }
+
+  createUI() {
+    // Create panel
+    this.panel = document.createElement('div');
+    this.panel.id = 'adaptive-heuristics-panel';
+    this.panel.style.cssText = `
+      position: fixed;
+      top: 60px;
+      right: 10px;
+      background: rgba(0, 0, 0, 0.9);
+      color: #00ff88;
+      font-family: 'Courier New', monospace;
+      font-size: 11px;
+      padding: 15px;
+      border: 2px solid #00ff88;
+      border-radius: 5px;
+      min-width: 380px;
+      width: 380px;
+      max-height: 85vh;
+      overflow-y: auto;
+      overflow-x: hidden;
+      display: none;
+      z-index: 1001;
+      box-sizing: border-box;
+    `;
+
+    // Header
+    const header = document.createElement('div');
+    header.innerHTML = '<h3 style="margin:0 0 8px 0; color:#00ffff;">🧠 Adaptive Heuristics</h3>';
+    this.panel.appendChild(header);
+
+    // Status section
+    const statusSection = this.createSection('Status');
+    statusSection.innerHTML += `
+      <div id="ah-status" style="font-size: 10px; color: #888; margin: 5px 0;">
+        Disabled
+      </div>
+      <div id="ah-stats" style="font-size: 10px; color: #ccc; margin: 5px 0;">
+        <div>Samples: <span id="ah-samples">0</span></div>
+        <div>Avg Reward: <span id="ah-reward">0.00</span></div>
+      </div>
+    `;
+    this.panel.appendChild(statusSection);
+
+    // Quick controls
+    const controlsSection = this.createSection('Controls');
+    controlsSection.innerHTML += `
+      <div style="display: flex; gap: 5px; margin-bottom: 8px;">
+        <button id="ah-toggle" style="flex: 1;">▶️ Start Learning</button>
+        <button id="ah-reset" style="flex: 1;">🔄 Reset</button>
+      </div>
+      <div style="display: flex; gap: 5px;">
+        <button id="ah-save" style="flex: 1;">💾 Save</button>
+        <button id="ah-load" style="flex: 1;">📂 Load</button>
+      </div>
+    `;
+    this.panel.appendChild(controlsSection);
+
+    // Live parameters
+    const paramsSection = this.createSection('Live Parameters');
+    paramsSection.innerHTML += `
+      <div style="font-size: 10px; color: #aaa; margin-bottom: 8px;">
+        Color coding: <span style="color: #4dffaa;">🟢 >1.0</span> <span style="color: #ff8866;">🔴 <1.0</span> <span style="color: #ccc;">⚪ =1.0</span>
+      </div>
+      <div id="ah-params" style="font-size: 10px; color: #ccc;">
+        <div style="margin-bottom: 4px;"><strong style="color: #88ffff;">Movement:</strong></div>
+        <div>• Speed: <span id="ah-speed">1.00</span> • Cost: <span id="ah-cost">1.00</span> • Wall Avoid: <span id="ah-wall">1.00</span></div>
+        <div>• Resource Seek: <span id="ah-resource">1.00</span></div>
+
+        <div style="margin: 6px 0 4px 0;"><strong style="color: #88ffff;">Exploration:</strong></div>
+        <div>• Noise Base: <span id="ah-noise-base">1.00</span> • Noise Gain: <span id="ah-noise-gain">1.00</span> • Sense Range: <span id="ah-sense">1.00</span></div>
+
+        <div style="margin: 6px 0 4px 0;"><strong style="color: #88ffff;">Trails:</strong></div>
+        <div>• Deposit: <span id="ah-deposit">1.00</span> • Follow: <span id="ah-follow">1.00</span> • Sample Dist: <span id="ah-sample">1.00</span></div>
+
+        <div style="margin: 6px 0 4px 0;"><strong style="color: #88ffff;">Frustration:</strong></div>
+        <div>• Build Rate: <span id="ah-build">1.00</span> • Decay Rate: <span id="ah-decay">1.00</span></div>
+
+        <div style="margin: 6px 0 4px 0;"><strong style="color: #88ffff;">Hunger Amps:</strong></div>
+        <div>• Explore: <span id="ah-hunger-exp">1.00</span> • Frust: <span id="ah-hunger-frust">1.00</span> • Sense: <span id="ah-hunger-sense">1.00</span></div>
+      </div>
+    `;
+    this.panel.appendChild(paramsSection);
+
+    // Learning curves section
+    const curvesSection = this.createSection('Learning Curves');
+    curvesSection.innerHTML += `
+      <div style="font-size: 9px; color: #aaa; margin-bottom: 5px;">
+        Reward trends (last ${this.maxHistoryPoints} samples)
+      </div>
+      <canvas id="ah-learning-chart" width="100" height="80" style="background: #111; border: 1px solid #333; display: block; max-width: 100%;"></canvas>
+      <div style="font-size: 9px; color: #666; margin-top: 5px;">
+        <span style="color: #00ff88;">▬ Best</span> <span style="color: #ffaa00;">▬ Avg</span>
+      </div>
+    `;
+    this.panel.appendChild(curvesSection);
+
+    // Footer
+    const footer = document.createElement('div');
+    footer.style.cssText = 'margin-top: 15px; font-size: 9px; color: #666; border-top: 1px solid #333; padding-top: 8px;';
+    footer.innerHTML = 'Press [Y] to toggle • Learns in real-time during play';
+    this.panel.appendChild(footer);
+
+    this.container.appendChild(this.panel);
+
+    // Attach event listeners
+    this.attachEventListeners();
+
+    // Style buttons
+    setTimeout(() => {
+      this.panel.querySelectorAll('button').forEach(styleButton);
+    }, 0);
+  }
+
+  createSection(title) {
+    const section = document.createElement('div');
+    section.style.cssText = 'margin: 12px 0; padding: 8px; background: rgba(0,255,136,0.05); border-left: 2px solid #00ff88; box-sizing: border-box;';
+    section.innerHTML = `<div style="font-weight: bold; margin-bottom: 6px; color: #00ffff; font-size: 11px;">${title}</div>`;
+    return section;
+  }
+
+  attachEventListeners() {
+    document.getElementById('ah-toggle')?.addEventListener('click', () => {
+      const ah = this.trainingModule?.getAdaptiveHeuristics?.();
+      if (!ah) return;
+
+      const isActive = ah.isActive;
+      if (isActive) {
+        ah.toggle(); // Stop learning
+        this.updateStatus(ah.getStats());
+      } else {
+        ah.toggle(); // Start learning
+        this.updateStatus(ah.getStats());
+      }
+    });
+
+    document.getElementById('ah-reset')?.addEventListener('click', () => {
+      if (confirm('Reset adaptive heuristics learning?')) {
+        this.trainingModule?.resetAdaptiveHeuristics?.();
+        const ah = this.trainingModule?.getAdaptiveHeuristics?.();
+        this.updateStatus(ah ? ah.getStats() : null);
+      }
+    });
+
+    document.getElementById('ah-save')?.addEventListener('click', () => {
+      const ah = this.trainingModule?.getAdaptiveHeuristics?.();
+      if (!ah) return;
+
+      const state = ah.save();
+      const json = JSON.stringify(state, null, 2);
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `adaptive-heuristics-${Date.now()}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      console.log('Adaptive heuristics state saved!');
+    });
+
+    document.getElementById('ah-load')?.addEventListener('click', () => {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'application/json';
+      input.onchange = (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          try {
+            const state = JSON.parse(event.target.result);
+            this.trainingModule?.getAdaptiveHeuristics?.()?.load(state);
+            const ah = this.trainingModule?.getAdaptiveHeuristics?.();
+            this.updateStatus(ah ? ah.getStats() : null);
+            console.log('Adaptive heuristics state loaded!');
+          } catch (err) {
+            console.error('Failed to load adaptive heuristics:', err);
+            alert('Failed to load file');
+          }
+        };
+        reader.readAsText(file);
+      };
+      input.click();
+    });
+  }
+
+  updateStatus(stats) {
+    const statusEl = document.getElementById('ah-status');
+    const samplesEl = document.getElementById('ah-samples');
+    const rewardEl = document.getElementById('ah-reward');
+
+    if (statusEl && stats) {
+      statusEl.textContent = stats.isActive ? '✅ ACTIVE - Learning' : '⏸️ Disabled';
+      statusEl.style.color = stats.isActive ? '#00ff88' : '#888';
+    }
+
+    if (samplesEl) {
+      samplesEl.textContent = stats ? (stats.rewardHistory?.length || 0).toLocaleString() : '0';
+    }
+
+    if (rewardEl) {
+      rewardEl.textContent = stats ? stats.avgReward?.toFixed(2) : '0.00';
+    }
+
+    this.updateParameters(stats);
+    this.updateLearningCurve(stats);
+  }
+
+  updateParameters(stats) {
+    if (!stats?.currentMultipliers) return;
+
+    const m = stats.currentMultipliers;
+
+    // Movement
+    this.updateParam('ah-speed', m.moveSpeedPxPerSec);
+    this.updateParam('ah-cost', m.moveCostPerSecond);
+    this.updateParam('ah-wall', m.wallAvoidStrength);
+    this.updateParam('ah-resource', m.resourceAttractionStrength);
+
+    // Exploration
+    this.updateParam('ah-noise-base', m.exploreNoiseBase);
+    this.updateParam('ah-noise-gain', m.exploreNoiseGain);
+    this.updateParam('ah-sense', m.sensoryRangeBase);
+
+    // Trails
+    this.updateParam('ah-deposit', m.depositPerSec);
+    this.updateParam('ah-follow', m.trailFollowingFar);
+    this.updateParam('ah-sample', m.aiSampleDistance);
+
+    // Frustration
+    this.updateParam('ah-build', m.frustrationBuildRate);
+    this.updateParam('ah-decay', m.frustrationDecayRate);
+
+    // Hunger Amplifiers
+    this.updateParam('ah-hunger-exp', m.hungerExplorationAmp);
+    this.updateParam('ah-hunger-frust', m.hungerFrustrationAmp);
+    this.updateParam('ah-hunger-sense', m.hungerSenseAmp);
+  }
+
+  updateParam(id, value) {
+    const el = document.getElementById(id);
+    if (el) {
+      const val = value?.toFixed(2) || '1.00';
+      el.textContent = val;
+
+      // Color coding
+      if (value > 1.1) {
+        el.style.color = '#4dffaa';
+      } else if (value < 0.9) {
+        el.style.color = '#ff8866';
+      } else {
+        el.style.color = '#ccc';
+      }
+    }
+  }
+
+  updateLearningCurve(stats) {
+    const canvas = document.getElementById('ah-learning-chart');
+    if (!canvas || !stats?.parameterHistory?.length) return;
+
+    const ctx = canvas.getContext('2d');
+    const width = canvas.width;
+    const height = canvas.height;
+
+    // Clear
+    ctx.fillStyle = '#111';
+    ctx.fillRect(0, 0, width, height);
+
+    const history = stats.parameterHistory.slice(-this.maxHistoryPoints);
+    if (history.length < 2) return;
+
+    // Get reward values
+    const rewards = history.map(h => h.reward);
+    const minReward = Math.min(...rewards);
+    const maxReward = Math.max(...rewards);
+    const range = maxReward - minReward || 1;
+
+    // Draw curves
+    this.drawCurve(ctx, rewards, '#ffaa00', width, height, minReward, range); // Avg (orange)
+
+    // Legend
+    ctx.fillStyle = '#ffaa00';
+    ctx.font = '9px monospace';
+    ctx.fillText('Reward', 5, 12);
+  }
+
+  drawCurve(ctx, data, color, width, height, minVal, range) {
+    if (data.length < 2) return;
+
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+
+    data.forEach((val, i) => {
+      const x = (i / (data.length - 1)) * width;
+      const y = height - ((val - minVal) / range) * height;
+      if (i === 0) {
+        ctx.moveTo(x, y);
+      } else {
+        ctx.lineTo(x, y);
+      }
+    });
+
+    ctx.stroke();
+  }
+
+  startPeriodicUpdates() {
+    setInterval(() => {
+      if (this.isVisible && this.trainingModule?.getAdaptiveHeuristics) {
+        const ah = this.trainingModule.getAdaptiveHeuristics();
+        if (ah) {
+          this.updateStatus(ah.getStats());
+        }
+      }
+    }, 250); // Update every 250ms when visible
+  }
+
+  toggle() {
+    this.isVisible = !this.isVisible;
+    this.panel.style.display = this.isVisible ? 'block' : 'none';
+
+    if (this.isVisible) {
+      // Refresh data when shown
+      const ah = this.trainingModule?.getAdaptiveHeuristics?.();
+      if (ah) {
+        this.updateStatus(ah.getStats());
+      }
+    }
+  }
+
+  show() {
+    this.isVisible = true;
+    this.panel.style.display = 'block';
+
+    const ah = this.trainingModule?.getAdaptiveHeuristics?.();
+    if (ah) {
+      this.updateStatus(ah.getStats());
+    }
+  }
+
+  hide() {
+    this.isVisible = false;
+    this.panel.style.display = 'none';
+  }
+}
+
 // Style button helper
 function styleButton(btn) {
   btn.style.cssText = `
     background: #00ff88;
     color: #000;
     border: none;
-    padding: 8px 15px;
+    padding: 6px 10px;
     cursor: pointer;
     border-radius: 3px;
     font-family: 'Courier New', monospace;
-    font-size: 11px;
-    width: 100%;
+    font-size: 10px;
     font-weight: bold;
   `;
-  
+
   btn.onmouseenter = () => {
     btn.style.background = '#00ffff';
   };
-  
+
   btn.onmouseleave = () => {
     btn.style.background = '#00ff88';
   };
@@ -571,6 +933,6 @@ function styleButton(btn) {
 
 // Apply button styles
 setTimeout(() => {
-  document.querySelectorAll('#training-panel button').forEach(styleButton);
+  document.querySelectorAll('#training-panel button, #adaptive-heuristics-panel button').forEach(styleButton);
 }, 0);
 

@@ -49,7 +49,8 @@ export function createBundleClass(context) {
     getAgentColorRGB,
     getAgentTrailsContainer,
     getAgentsContainer,
-    getWorld  // Callback pattern - World is referenced later when needed
+    getWorld,  // Callback pattern - World is referenced later when needed
+    getTrainingModule  // For adaptive heuristics access
   } = context;
 
   if (!Trail) throw new Error('Trail dependency is required');
@@ -71,6 +72,7 @@ export function createBundleClass(context) {
   if (typeof getAgentTrailsContainer !== 'function') throw new Error('getAgentTrailsContainer dependency is required');
   if (typeof getAgentsContainer !== 'function') throw new Error('getAgentsContainer dependency is required');
   if (typeof getWorld !== 'function') throw new Error('getWorld dependency is required');
+  if (typeof getTrainingModule !== 'function') throw new Error('getTrainingModule dependency is required');
 
   const currentTick = () => getGlobalTick();
   const width = () => getCanvasWidth();
@@ -270,8 +272,11 @@ export function createBundleClass(context) {
 
       // sensing (extended by default for better foraging)
       this.extendedSensing = true;
-      this.currentSensoryRange = CONFIG.aiSensoryRangeBase;
-      this._targetSensoryRange = CONFIG.aiSensoryRangeBase;
+      const trainingModule = typeof getTrainingModule === 'function' ? getTrainingModule() : null;
+      const adaptiveHeuristics = trainingModule?.getAdaptiveHeuristics?.();
+      const baseSensory = adaptiveHeuristics?.getParam('sensoryRangeBase') ?? CONFIG.aiSensoryRangeBase;
+      this.currentSensoryRange = baseSensory;
+      this._targetSensoryRange = baseSensory;
 
       // frustration (0..1)
       this.frustration = 0;
@@ -351,6 +356,9 @@ export function createBundleClass(context) {
     }
 
     computeSensoryRange(dt) {
+      const trainingModule = typeof getTrainingModule === 'function' ? getTrainingModule() : null;
+      const adaptiveHeuristics = trainingModule?.getAdaptiveHeuristics?.();
+      
       const result = computeSensingUpdate({
         extendedSensing: this.extendedSensing,
         alive: this.alive,
@@ -359,7 +367,7 @@ export function createBundleClass(context) {
         currentSensoryRange: this.currentSensoryRange,
         targetSensoryRange: this._targetSensoryRange,
         chi: this.chi
-      }, dt, CONFIG);
+      }, dt, CONFIG, adaptiveHeuristics);
 
       this._targetSensoryRange = result.targetRange;
       this.currentSensoryRange = result.currentSensoryRange;
@@ -382,9 +390,13 @@ export function createBundleClass(context) {
       const distressWeight = getSignalWeight('distress');
       const bondWeight = getSignalWeight('bond');
 
+      // Get adaptive heuristics for parameter modulation
+      const trainingModule = typeof getTrainingModule === 'function' ? getTrainingModule() : null;
+      const adaptiveHeuristics = trainingModule?.getAdaptiveHeuristics?.();
+
       // (1) Wall avoidance - repulsion from ALL nearby walls (handles corners!)
       const wallMargin = CONFIG.aiWallAvoidMargin;
-      const wallStrength = CONFIG.aiWallAvoidStrength;
+      const wallStrength = adaptiveHeuristics?.getParam('wallAvoidStrength') ?? CONFIG.aiWallAvoidStrength;
 
       const canvasW = width();
       const canvasH = height();
@@ -418,7 +430,7 @@ export function createBundleClass(context) {
         const dist = Math.hypot(tx, ty);
         if (dist > 0 && dist <= this.currentSensoryRange) {
           // Use configurable attraction strength to overpower competing forces
-          const baseAttraction = CONFIG.aiResourceAttractionStrength || 1.0;
+          const baseAttraction = adaptiveHeuristics?.getParam('resourceAttractionStrength') ?? CONFIG.aiResourceAttractionStrength ?? 1.0;
           
           // Optional: Scale attraction stronger when closer (1x at max range, up to 2x when very close)
           const distanceFactor = CONFIG.aiResourceAttractionScaleWithDistance 
@@ -434,8 +446,8 @@ export function createBundleClass(context) {
       }
 
       // (3) trail following (reduced near walls and when close to resources)
-      let trailStrength = resourceVisible ? CONFIG.aiTrailFollowingNear
-                                           : CONFIG.aiTrailFollowingFar;
+      let trailStrength = resourceVisible ? (adaptiveHeuristics?.getParam('trailFollowingNear') ?? CONFIG.aiTrailFollowingNear)
+                                           : (adaptiveHeuristics?.getParam('trailFollowingFar') ?? CONFIG.aiTrailFollowingFar);
 
       // Reduce trail following when very close to resource (direct pursuit mode)
       if (resource && resourceVisible) {
@@ -456,7 +468,9 @@ export function createBundleClass(context) {
       }
 
       if (trailStrength > 0) {
-        const sampleDist = CONFIG.aiSampleDistance;
+        const trainingModule = typeof getTrainingModule === 'function' ? getTrainingModule() : null;
+        const adaptiveHeuristics = trainingModule?.getAdaptiveHeuristics?.();
+        const sampleDist = adaptiveHeuristics?.getParam('aiSampleDistance') ?? CONFIG.aiSampleDistance;
         let sumX = 0, sumY = 0, wsum = 0;
         for (let angle = 0; angle < Math.PI * 2; angle += Math.PI / 8) {
           const cx = Math.cos(angle), sy = Math.sin(angle);
@@ -483,7 +497,8 @@ export function createBundleClass(context) {
         if (grad && (grad.dx !== 0 || grad.dy !== 0)) {
           // Scale pull strength with hunger - stronger when more desperate
           const hungerScale = smoothstep(CONFIG.hungerThresholdLow, 1.0, this.hunger);
-          const pull = resourceBias * SIGNAL_RESOURCE_PULL_GAIN * resourceWeight * (0.3 + hungerScale * 0.7);
+          const signalResourceGain = adaptiveHeuristics?.getParam('signalResourceGain') ?? SIGNAL_RESOURCE_PULL_GAIN;
+          const pull = resourceBias * signalResourceGain * resourceWeight * (0.3 + hungerScale * 0.7);
           if (pull > 0) {
             dx += grad.dx * pull;
             dy += grad.dy * pull;
@@ -540,10 +555,17 @@ export function createBundleClass(context) {
       // (4) exploration noise scales with frustration AND hunger (+bereavement)
       const f = clamp(this.frustration, 0, 1);
       const h = clamp(this.hunger, 0, 1);
+      
+      // Get adaptive parameters
+      const exploreNoiseBase = adaptiveHeuristics?.getParam('exploreNoiseBase') ?? CONFIG.aiExploreNoiseBase;
+      const exploreNoiseGain = adaptiveHeuristics?.getParam('exploreNoiseGain') ?? CONFIG.aiExploreNoiseGain;
+      const hungerExploreAmp = adaptiveHeuristics?.getParam('hungerExplorationAmp') ?? CONFIG.hungerExplorationAmp;
+      
       // Hunger amplifies exploration - hungry agents explore more desperately
-      const hungerAmp = 1 + (CONFIG.hungerExplorationAmp - 1) * h;
+      const hungerAmp = 1 + (hungerExploreAmp - 1) * h;
       const bereaveMul = 1 + (this.bereavementBoostTicks > 0 ? (CONFIG.bondLoss?.onDeathExploreBoost ?? 0) : 0);
-      const distressGain = SIGNAL_DISTRESS_NOISE_GAIN * distressWeight;
+      const signalDistressGain = adaptiveHeuristics?.getParam('signalDistressGain') ?? SIGNAL_DISTRESS_NOISE_GAIN;
+      const distressGain = signalDistressGain * distressWeight;
       const distressMul = 1 + distressBias * distressGain;
       if (distressBias > 1e-3 && distressGain !== 0) {
         SignalResponseAnalytics.logResponse('distress', currentTick(), this.id, {
@@ -552,7 +574,7 @@ export function createBundleClass(context) {
           mode: 'exploration-noise'
         });
       }
-      const baseNoise = (CONFIG.aiExploreNoiseBase + CONFIG.aiExploreNoiseGain * f) * hungerAmp * bereaveMul;
+      const baseNoise = (exploreNoiseBase + exploreNoiseGain * f) * hungerAmp * bereaveMul;
       const waveNoiseBoost = 1 + waveDistress * 0.5;
       const waveNoiseDamp = Math.max(0.25, 1 - (waveResource * 0.45 + waveBond * 0.35));
       const noise = baseNoise * distressMul * waveNoiseBoost * waveNoiseDamp;
@@ -577,6 +599,9 @@ export function createBundleClass(context) {
       });
       let chiSpend = metabolicCost;
 
+      const trainingModule = typeof getTrainingModule === 'function' ? getTrainingModule() : null;
+      const adaptiveHeuristics = trainingModule?.getAdaptiveHeuristics?.();
+      
       const sensingResult = computeSensingUpdate({
         extendedSensing: this.extendedSensing,
         alive: this.alive,
@@ -585,7 +610,7 @@ export function createBundleClass(context) {
         currentSensoryRange: this.currentSensoryRange,
         targetSensoryRange: this._targetSensoryRange,
         chi: this.chi
-      }, dt, CONFIG);
+      }, dt, CONFIG, adaptiveHeuristics);
       this._targetSensoryRange = sensingResult.targetRange;
       this.currentSensoryRange = sensingResult.currentSensoryRange;
       chiSpend += sensingResult.cost;
@@ -635,6 +660,10 @@ export function createBundleClass(context) {
         this.vx = steering.vx;
         this.vy = steering.vy;
 
+        const depositRate = adaptiveHeuristics?.getParam('depositPerSec') ?? CONFIG.depositPerSec;
+        
+        const movementCost = adaptiveHeuristics?.getParam('moveCostPerSecond') ?? CONFIG.moveCostPerSecond;
+
         const movement = computeMovement({
           position: { x: this.x, y: this.y },
           velocity: { vx: this.vx, vy: this.vy },
@@ -642,8 +671,8 @@ export function createBundleClass(context) {
           size: this.size,
           canvasWidth: width(),
           canvasHeight: height(),
-          moveCostPerSecond: CONFIG.moveCostPerSecond,
-          depositPerSec: CONFIG.depositPerSec,
+          moveCostPerSecond: movementCost,
+          depositPerSec: depositRate,
           chi: this.chi,
           agentId: this.id
         });
@@ -873,13 +902,20 @@ export function createBundleClass(context) {
       }
       this.participationWaveSample = waveSample;
 
+      // Get adaptive frustration parameters
+      const trainingModule = typeof getTrainingModule === 'function' ? getTrainingModule() : null;
+      const adaptiveHeuristics = trainingModule?.getAdaptiveHeuristics?.();
+      const frustBuildRate = adaptiveHeuristics?.getParam('frustrationBuildRate') ?? CONFIG.aiFrustrationBuildRate;
+      const frustDecayRate = adaptiveHeuristics?.getParam('frustrationDecayRate') ?? CONFIG.aiFrustrationDecayRate;
+      const hungerFrustAmp = adaptiveHeuristics?.getParam('hungerFrustrationAmp') ?? CONFIG.hungerFrustrationAmp;
+
       if (canSeeResource || ticksSinceCollect <= CONFIG.aiFrustrationSightGrace) {
-        this.frustration = Math.max(0, this.frustration - CONFIG.aiFrustrationDecayRate * dt);
+        this.frustration = Math.max(0, this.frustration - frustDecayRate * dt);
       } else if (lowTrail) {
         // Hunger amplifies frustration build rate - hungry agents get frustrated faster!
         const h = clamp(this.hunger, 0, 1);
-        const hungerAmp = 1 + (CONFIG.hungerFrustrationAmp - 1) * h;
-        this.frustration = Math.min(1, this.frustration + CONFIG.aiFrustrationBuildRate * hungerAmp * dt);
+        const hungerAmp = 1 + (hungerFrustAmp - 1) * h;
+        this.frustration = Math.min(1, this.frustration + frustBuildRate * hungerAmp * dt);
       }
 
       if (waveSample) {
@@ -889,17 +925,17 @@ export function createBundleClass(context) {
 
         if (resourceRelief > 0) {
           const hungerFactor = 0.5 + 0.5 * clamp(this.hunger, 0, 1);
-          const reliefRate = CONFIG.aiFrustrationDecayRate * hungerFactor;
+          const reliefRate = frustDecayRate * hungerFactor;
           this.frustration = Math.max(0, this.frustration - reliefRate * resourceRelief * dt);
         }
 
         if (bondRelief > 0) {
-          const reliefRate = CONFIG.aiFrustrationDecayRate * 0.35;
+          const reliefRate = frustDecayRate * 0.35;
           this.frustration = Math.max(0, this.frustration - reliefRate * bondRelief * dt);
         }
 
         if (distressPressure > 0 && !canSeeResource) {
-          const pressureGain = CONFIG.aiFrustrationBuildRate * (0.4 + 0.6 * clamp(this.hunger, 0, 1));
+          const pressureGain = frustBuildRate * (0.4 + 0.6 * clamp(this.hunger, 0, 1));
           this.frustration = Math.min(1, this.frustration + pressureGain * distressPressure * dt);
         }
       } else {
@@ -1063,9 +1099,14 @@ export function createBundleClass(context) {
       this._lastDirY = Math.sin(this.heading);
 
       // Apply thrust to velocity with hunger-amplified surge (matching heuristic AI)
-      const hungerAmp = 1 + (CONFIG.hungerSurgeAmp - 1) * h;
+      const trainingModule = typeof getTrainingModule === 'function' ? getTrainingModule() : null;
+      const adaptiveHeuristics = trainingModule?.getAdaptiveHeuristics?.();
+      const hungerSurgeAmp = adaptiveHeuristics?.getParam('hungerSurgeAmp') ?? CONFIG.hungerSurgeAmp;
+      const moveSpeed = adaptiveHeuristics?.getParam('moveSpeedPxPerSec') ?? CONFIG.moveSpeedPxPerSec;
+      
+      const hungerAmp = 1 + (hungerSurgeAmp - 1) * h;
       const surge = (1.0 + CONFIG.aiSurgeMax * smoothstep(0.2, 1.0, f)) * hungerAmp;
-      const speed = CONFIG.moveSpeedPxPerSec * action.thrust * surge;
+      const speed = moveSpeed * action.thrust * surge;
       const targetVx = this._lastDirX * speed;
       const targetVy = this._lastDirY * speed;
       const velLerp = 1 - Math.exp(-6 * dt);
@@ -1078,7 +1119,10 @@ export function createBundleClass(context) {
       this.y += this.vy * dt;
 
       const movedDist = Math.hypot(this.x - oldX, this.y - oldY);
-      if (movedDist > 0) chiSpend += CONFIG.moveCostPerSecond * dt;
+      const trainingModule2 = typeof getTrainingModule === 'function' ? getTrainingModule() : null;
+      const adaptiveHeuristics2 = trainingModule2?.getAdaptiveHeuristics?.();
+      const movementCost = adaptiveHeuristics2?.getParam('moveCostPerSecond') ?? CONFIG.moveCostPerSecond;
+      if (movedDist > 0) chiSpend += movementCost * dt;
 
       // Stay inside viewport
       const half = this.size / 2;
@@ -1092,8 +1136,11 @@ export function createBundleClass(context) {
 
       // Deposit trail when moving
       if (movedDist > 0) {
+        const trainingModule = typeof getTrainingModule === 'function' ? getTrainingModule() : null;
+        const adaptiveHeuristics = trainingModule?.getAdaptiveHeuristics?.();
+        const depositRate = adaptiveHeuristics?.getParam('depositPerSec') ?? CONFIG.depositPerSec;
         const health = clamp(this.chi / 20, 0.2, 1.0);
-        const dep = CONFIG.depositPerSec * health * dt;
+        const dep = depositRate * health * dt;
         const radius = this.size / 2;
         Trail.deposit(this.x, this.y, dep, this.id);
         // Add subtle radial deposits around the circle for visibility
@@ -1207,9 +1254,9 @@ export function createBundleClass(context) {
         world.addLineageLink(parent.id, childId, getGlobalTick());
       }
 
-      console.log(
-        `🧫 ${eventLabel}! Agent ${parent.id} (gen ${parentGeneration}) → Agent ${child.id} (gen ${child.generation}) | Pop: ${world.bundles.length}`
-      );
+      // console.log(
+      //   `🧫 ${eventLabel}! Agent ${parent.id} (gen ${parentGeneration}) → Agent ${child.id} (gen ${child.generation}) | Pop: ${world.bundles.length}`
+      // );
 
       return child;
     }
