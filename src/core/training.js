@@ -3,7 +3,7 @@ import { collectResource } from '../systems/resourceSystem.js';
 import { MetricsTracker } from './metricsTracker.js';
 import { ConfigOptimizer, ConfigTrainingManager, TUNABLE_PARAMS } from './configOptimizer.js';
 import { AdaptiveHeuristics } from './adaptiveHeuristics.js';
-import { buildObservation } from '../observations.js';
+import { buildObservation } from '../../observations.js';
 
 export function createTrainingModule({
   world,
@@ -115,6 +115,32 @@ export function createTrainingModule({
         world
       });
     };
+  }
+
+  // Adaptive Heuristics functions
+  function toggleAdaptiveHeuristics() {
+    const ah = ensureAdaptiveHeuristics();
+    ah.toggle();
+    return ah.isActive;
+  }
+
+  function getAdaptiveHeuristicsStats() {
+    const ah = ensureAdaptiveHeuristics();
+    return ah.getStats();
+  }
+
+  function learnAdaptiveHeuristics(reward, observation) {
+    const ah = ensureAdaptiveHeuristics();
+    ah.learn(reward, observation);
+  }
+
+  function resetAdaptiveHeuristics() {
+    const ah = ensureAdaptiveHeuristics();
+    ah.reset();
+  }
+
+  function getAdaptiveHeuristics() {
+    return ensureAdaptiveHeuristics();
   }
 
   async function runHeuristicEpisode() {
@@ -1071,26 +1097,8 @@ export function createTrainingModule({
       alert('✅ Config applied and world reset!\n\nWatch the agents perform with the optimized parameters!');
     });
 
-    // Adaptive Heuristics callbacks
-    ui.on('onToggleAdaptive', () => {
-      const isActive = toggleAdaptiveHeuristics();
-      console.log(`Adaptive heuristics ${isActive ? 'enabled' : 'disabled'}`);
-    });
-
-    ui.on('onResetAdaptive', () => {
-      resetAdaptiveHeuristics();
-      console.log('Adaptive heuristics learning reset');
-    });
 
     console.log('Training UI initialized. Press [L] to toggle.');
-
-    // Periodic UI updates for adaptive heuristics
-    setInterval(() => {
-      if (ui.updateAdaptiveStatus) {
-        const stats = getAdaptiveHeuristicsStats();
-        ui.updateAdaptiveStatus(stats);
-      }
-    }, 1000); // Update every second
   }
   
   function getMetricsExport() {
@@ -1136,23 +1144,8 @@ export function createTrainingModule({
     getConfigOptimizer: () => configOptimizer,
     getConfigTrainingManager: () => configTrainingManager,
     // Adaptive Heuristics
-    toggleAdaptiveHeuristics: () => {
-      const ah = ensureAdaptiveHeuristics();
-      ah.toggle();
-      return ah.isActive;
-    },
-    getAdaptiveHeuristicsStats: () => {
-      const ah = ensureAdaptiveHeuristics();
-      return ah.getStats();
-    },
-    learnAdaptiveHeuristics: (reward, observation) => {
-      const ah = ensureAdaptiveHeuristics();
-      ah.learn(reward, observation);
-    },
-    resetAdaptiveHeuristics: () => {
-      const ah = ensureAdaptiveHeuristics();
-      ah.reset();
-    },
-    getAdaptiveHeuristics: () => ensureAdaptiveHeuristics()
+    getAdaptiveHeuristics,
+    learnAdaptiveHeuristics,
+    resetAdaptiveHeuristics,
   };
 }

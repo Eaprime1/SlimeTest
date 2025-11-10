@@ -15,6 +15,7 @@ export function initializeInputManager({
   getTrail,
   getSignalField,
   getTrainingUI,
+  getAdaptiveHeuristicsUI,
   getParticipationManager,
   getTrainingModule,
   CONFIG
@@ -137,6 +138,7 @@ export function initializeInputManager({
     const trail = typeof getTrail === 'function' ? getTrail() : undefined;
     const signalField = typeof getSignalField === 'function' ? getSignalField() : undefined;
     const trainingUI = typeof getTrainingUI === 'function' ? getTrainingUI() : undefined;
+    const adaptiveHeuristicsUI = typeof getAdaptiveHeuristicsUI === 'function' ? getAdaptiveHeuristicsUI() : undefined;
 
     switch (e.code) {
       case 'Space':
@@ -192,6 +194,9 @@ export function initializeInputManager({
         break;
       case 'KeyL':
         trainingUI?.toggle?.();
+        break;
+      case 'KeyY':
+        adaptiveHeuristicsUI?.toggle?.();
         break;
       case 'KeyG':
         state.showScentGradient = !state.showScentGradient;

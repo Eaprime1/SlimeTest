@@ -9,13 +9,40 @@ export class AdaptiveHeuristics {
 
     // Base parameters (from CONFIG) that we can modulate
     this.baseParams = {
+      // Movement & Navigation
       wallAvoidStrength: config.aiWallAvoidStrength || 1.5,
       resourceAttractionStrength: config.aiResourceAttractionStrength || 1.0,
+      moveSpeedPxPerSec: config.moveSpeedPxPerSec || 150,
+      moveCostPerSecond: config.moveCostPerSecond || 0.35,
+
+      // Trail System
       trailFollowingFar: config.aiTrailFollowingFar || 0.6,
       trailFollowingNear: config.aiTrailFollowingNear || 0.3,
+      depositPerSec: config.depositPerSec || 2.5,
+      aiSampleDistance: config.aiSampleDistance || 46,
+
+      // Exploration
+      exploreNoiseBase: config.aiExploreNoiseBase || 0.15,
+      exploreNoiseGain: config.aiExploreNoiseGain || 0.55,
+
+      // Sensing
+      sensoryRangeBase: config.aiSensoryRangeBase || 175,
+
+      // Frustration
+      frustrationBuildRate: config.aiFrustrationBuildRate || 0.5,
+      frustrationDecayRate: config.aiFrustrationDecayRate || 0.6,
+
+      // Hunger Amplifiers
+      hungerExplorationAmp: config.hungerExplorationAmp || 5.0,
+      hungerFrustrationAmp: config.hungerFrustrationAmp || 3.0,
+      hungerSenseAmp: config.hungerSenseAmp || 2.0,
+      hungerSurgeAmp: config.hungerSurgeAmp || 1.5,
+
+      // Signals
       signalResourceGain: config.signal?.resourcePullGain || 0.8,
       signalDistressGain: config.signal?.distressNoiseGain || 0.3,
-      hungerSurgeAmp: config.hungerSurgeAmp || 2.0,
+
+      // Turn Rate
       turnRateGain: config.aiTurnRateGain || 0.3
     };
 
@@ -23,17 +50,29 @@ export class AdaptiveHeuristics {
     this.adaptiveMultipliers = {
       wallAvoidStrength: 1.0,
       resourceAttractionStrength: 1.0,
+      moveSpeedPxPerSec: 1.0,
+      moveCostPerSecond: 1.0,
       trailFollowingFar: 1.0,
       trailFollowingNear: 1.0,
+      depositPerSec: 1.0,
+      aiSampleDistance: 1.0,
+      exploreNoiseBase: 1.0,
+      exploreNoiseGain: 1.0,
+      sensoryRangeBase: 1.0,
+      frustrationBuildRate: 1.0,
+      frustrationDecayRate: 1.0,
+      hungerExplorationAmp: 1.0,
+      hungerFrustrationAmp: 1.0,
+      hungerSenseAmp: 1.0,
+      hungerSurgeAmp: 1.0,
       signalResourceGain: 1.0,
       signalDistressGain: 1.0,
-      hungerSurgeAmp: 1.0,
       turnRateGain: 1.0
     };
 
     // Learning state
     this.isActive = false;
-    this.learningRate = 0.001; // Conservative learning
+    this.learningRate = 0.05; // More aggressive for visible changes
     this.performanceHistory = [];
     this.historySize = 100;
     this.baselineReward = 0;
@@ -44,7 +83,7 @@ export class AdaptiveHeuristics {
     this.rewardHistory = [];
     this.parameterHistory = [];
 
-    console.log('🧠 Adaptive Heuristics initialized with', Object.keys(this.baseParams).length, 'parameters');
+    // console.log('🧠 Adaptive Heuristics initialized with', Object.keys(this.baseParams).length, 'parameters');
   }
 
   /**
@@ -74,12 +113,15 @@ export class AdaptiveHeuristics {
    */
   toggle() {
     this.isActive = !this.isActive;
-    console.log(`🧠 Adaptive Heuristics ${this.isActive ? 'ENABLED' : 'DISABLED'}`);
+    console.log(`🧠 Adaptive Heuristics ${this.isActive ? '✅ ENABLED' : '⏸️  DISABLED'}`);
 
     if (this.isActive) {
       // Reset performance baseline when starting
       this.baselineReward = this.lastReward || 0;
       this.performanceHistory = [];
+      console.log(`   📊 Learning rate: ${this.learningRate}`);
+      console.log(`   🎯 Parameters being adapted: ${Object.keys(this.baseParams).length}`);
+      console.log(`   ⏱️  Will start learning after ${5} reward samples`);
     }
   }
 
@@ -102,8 +144,8 @@ export class AdaptiveHeuristics {
     // Compute reward relative to baseline
     const rewardDelta = reward - this.baselineReward;
 
-    // Only learn if we have enough data
-    if (this.rewardHistory.length < 10) return;
+    // Only learn if we have enough data (reduced to 5 for faster response)
+    if (this.rewardHistory.length < 5) return;
 
     // Compute parameter gradients based on reward and current observation
     const gradients = this.computeGradients(rewardDelta, observation);
@@ -135,6 +177,8 @@ export class AdaptiveHeuristics {
 
     const learningSignal = Math.tanh(rewardDelta * 0.1); // Scale to reasonable range
 
+    // === Movement & Navigation ===
+    
     // Wall avoidance: increase when near walls and getting negative rewards
     const nearWall = observation.wallMag || 0;
     gradients.wallAvoidStrength = learningSignal * nearWall * 0.1;
@@ -143,24 +187,70 @@ export class AdaptiveHeuristics {
     const resourceVisible = observation.resVisible || 0;
     gradients.resourceAttractionStrength = learningSignal * resourceVisible * 0.1;
 
+    // Movement speed: increase with positive rewards, decrease with negative
+    // Higher speed when doing well, slower when struggling
+    gradients.moveSpeedPxPerSec = learningSignal * 0.08;
+
+    // Movement cost: lower cost when doing well, higher cost when struggling
+    // This creates an energy management trade-off
+    gradients.moveCostPerSecond = -learningSignal * 0.06;
+
+    // === Trail System ===
+    
     // Trail following: increase when trails are strong and getting positive rewards
     const trailStrength = observation.trailMean || 0;
     gradients.trailFollowingFar = learningSignal * trailStrength * 0.05;
     gradients.trailFollowingNear = learningSignal * trailStrength * 0.03;
+    
+    // Trail deposition: more marking when successful
+    gradients.depositPerSec = learningSignal * 0.04;
 
-    // Signal gains: increase when signals are present and relevant
+    // Trail sampling distance: longer look-ahead when doing well
+    gradients.aiSampleDistance = learningSignal * 0.05;
+
+    // === Exploration ===
+    
+    // Exploration noise: increase when stuck (high frustration, low reward)
+    const frustration = observation.frustration || 0;
+    const explorationSignal = -learningSignal + frustration * 0.5; // Explore more when frustrated
+    gradients.exploreNoiseBase = explorationSignal * 0.06;
+    gradients.exploreNoiseGain = explorationSignal * 0.05;
+
+    // === Sensing ===
+    
+    // Sensory range: increase when resources are far or hidden
+    const sensorySignal = learningSignal * (1 - resourceVisible); // More sensing when not seeing resources
+    gradients.sensoryRangeBase = sensorySignal * 0.07;
+
+    // === Frustration Rates ===
+    
+    // Build rate: slower build when doing well
+    gradients.frustrationBuildRate = -learningSignal * 0.05;
+    
+    // Decay rate: faster decay when doing well
+    gradients.frustrationDecayRate = learningSignal * 0.05;
+
+    // === Hunger Amplifiers ===
+    
+    const hunger = observation.hunger || 0;
+    const hungerSignal = learningSignal * hunger;
+    
+    // Amplifiers: increase hunger effects when they lead to success
+    gradients.hungerExplorationAmp = hungerSignal * 0.04;
+    gradients.hungerFrustrationAmp = hungerSignal * 0.04;
+    gradients.hungerSenseAmp = hungerSignal * 0.04;
+    gradients.hungerSurgeAmp = hungerSignal * 0.03;
+
+    // === Signals ===
+    
     const signalResource = observation.signalResource || 0;
     gradients.signalResourceGain = learningSignal * signalResource * 0.05;
 
     const signalDistress = observation.signalDistress || 0;
     gradients.signalDistressGain = learningSignal * signalDistress * 0.05;
 
-    // Hunger modulation: adjust based on hunger levels
-    const hunger = observation.hunger || 0;
-    gradients.hungerSurgeAmp = learningSignal * hunger * 0.03;
-
-    // Turn rate: adjust based on frustration (stuck situations)
-    const frustration = observation.frustration || 0;
+    // === Turn Rate ===
+    
     gradients.turnRateGain = learningSignal * frustration * 0.05;
 
     return gradients;
@@ -213,7 +303,7 @@ export class AdaptiveHeuristics {
     this.parameterHistory = [];
     this.baselineReward = 0;
 
-    console.log('🧠 Adaptive Heuristics reset to baseline');
+    // console.log('🧠 Adaptive Heuristics reset to baseline');
   }
 
   /**
@@ -244,6 +334,6 @@ export class AdaptiveHeuristics {
     if (state.parameterHistory) {
       this.parameterHistory = [...state.parameterHistory];
     }
-    console.log('🧠 Adaptive Heuristics state loaded');
+    // console.log('🧠 Adaptive Heuristics state loaded');
   }
 }

@@ -1,8 +1,8 @@
 // Essence Engine v0.6 — Learning system with plant ecology
 // Controls: [WASD/Arrows]=move (Agent 1 when MANUAL) | [A]=auto toggle | [S]=toggle extended sensing
-// [G]=scent gradient viz | [P]=fertility viz | [M]=mitosis toggle | [Space]=pause [R]=reset [C]=+5χ all 
+// [G]=scent gradient viz | [P]=fertility viz | [M]=mitosis toggle | [Space]=pause [R]=reset [C]=+5χ all
 // [T]=trail on/off [X]=clear trail [F]=diffusion on/off | [1-4]=toggle individual agents | [V]=toggle all | [L]=training UI
-// [H]=agent dashboard | [U]=cycle HUD (full/minimal/hidden) | [K]=toggle hotkey strip | [O]=config panel
+// [Y]=adaptive heuristics | [U]=cycle HUD (full/minimal/hidden) | [K]=toggle hotkey strip | [O]=config panel
 
 import { PIXI } from './lib/pixi.js';
 
@@ -25,8 +25,9 @@ import { PIXI } from './lib/pixi.js';
 import { CONFIG } from './config.js';
 import { SignalField } from './signalField.js';
 import { EpisodeManager, updateFindTimeEMA, calculateAdaptiveReward } from './rewards.js';
+import { buildObservation } from './observations.js';
 import { CEMLearner, TrainingManager } from './learner.js';
-import { TrainingUI } from './trainingUI.js';
+import { TrainingUI, AdaptiveHeuristicsUI } from './trainingUI.js';
 import { visualizeScentGradient, visualizeScentHeatmap } from './scentGradient.js';
 import { FertilityGrid, attemptSeedDispersal, attemptSpontaneousGrowth, getSpawnPressureMultiplier } from './plantEcology.js';
 import { SignalResponseAnalytics } from './analysis/signalResponseAnalytics.js';
@@ -52,6 +53,9 @@ import {
 
 const getTerrainHeight = null;
 const loadedPolicyInfo = null;
+
+// Declare trainingModule early to avoid initialization order issues
+let trainingModule = null;
 
 (() => {
     const canvas = document.getElementById("view");
@@ -897,6 +901,7 @@ const loadedPolicyInfo = null;
       getTrail: () => Trail,
       getSignalField: () => SignalField,
       getTrainingUI: () => window.trainingUI,
+      getAdaptiveHeuristicsUI: () => adaptiveHeuristicsUI,
       getParticipationManager: () => ParticipationManager,
       getTrainingModule: () => trainingModule,
       CONFIG
@@ -1109,7 +1114,7 @@ const loadedPolicyInfo = null;
     // This trainingModule creation MUST happen AFTER World is created above.
     // DO NOT move this code before World initialization!
     // ========================================================================
-    const trainingModule = createTrainingModule({
+    trainingModule = createTrainingModule({
       world: World,
       config: CONFIG,
       trail: Trail,
@@ -1306,7 +1311,7 @@ const loadedPolicyInfo = null;
         const simLines = [
           `⚙️  SIMULATION`,
           `   mode:      ${CONFIG.autoMove ? "AUTO" : "MANUAL"}`,
-          `   learning:  ${trainingModule.getLearningMode() === 'train' ? "TRAINING" : "PLAY"}`,
+          `   learning:  ${trainingModule?.getLearningMode?.() === 'train' ? "TRAINING" : "PLAY"}`,
           `   tick:      ${globalTick}`,
           `   χ earned:  ${World.collected}`
         ];
@@ -1901,6 +1906,38 @@ const loadedPolicyInfo = null;
             break;
           }
         }
+
+        // Adaptive heuristics learning during normal gameplay
+        const adaptiveHeuristics = trainingModule?.getAdaptiveHeuristics?.();
+        if (adaptiveHeuristics?.isActive) {
+          // Compute reward based on agent state
+          // Positive rewards: chi, recent resource collection
+          // Negative rewards: hunger, frustration
+          const chiReward = bundle.chi * 0.1;
+          const hungerPenalty = (bundle.hunger || 0) * -0.5;
+          const frustrationPenalty = (bundle.frustration || 0) * -0.3;
+          const reward = chiReward + hungerPenalty + frustrationPenalty;
+
+          // Find nearest visible resource for observation
+          let nearestResource = null;
+          let nearestDist = Infinity;
+          for (const res of World.resources) {
+            if (!res.visible) continue;
+            const dx = res.x - bundle.x;
+            const dy = res.y - bundle.y;
+            const dist = Math.hypot(dx, dy);
+            if (dist < nearestDist) {
+              nearestDist = dist;
+              nearestResource = res;
+            }
+          }
+
+          // Build observation for learning
+          const observation = buildObservation(bundle, nearestResource, Trail, globalTick, World.resources);
+
+          // Learn from this experience
+          trainingModule.learnAdaptiveHeuristics(reward, observation);
+        }
       });
 
       World.resources.forEach((res) => res.update(dt));
@@ -1927,21 +1964,21 @@ const loadedPolicyInfo = null;
           const excess = World.resources.length - maxResources;
           const removed = World.resources.splice(-excess, excess);
           removed.forEach(res => res.destroy());
-          console.log(`🔪 Culled ${excess} excess resources due to competition (${aliveCount} agents)`);
+          // console.log(`🔪 Culled ${excess} excess resources due to competition (${aliveCount} agents)`);
         }
 
         const seedLocation = attemptSeedDispersal(World.resources, FertilityField, globalTick, dt, aliveCount);
         if (seedLocation && World.resources.length < maxResources) {
           const newResource = new Resource(seedLocation.x, seedLocation.y, CONFIG.resourceRadius);
           World.resources.push(newResource);
-          console.log(`🌱 Seed sprouted at (${Math.round(seedLocation.x)}, ${Math.round(seedLocation.y)}) | Fertility: ${seedLocation.fertility.toFixed(2)}`);
+          // console.log(`🌱 Seed sprouted at (${Math.round(seedLocation.x)}, ${Math.round(seedLocation.y)}) | Fertility: ${seedLocation.fertility.toFixed(2)}`);
         }
 
         const growthLocation = attemptSpontaneousGrowth(FertilityField, dt, aliveCount, canvasWidth, canvasHeight);
         if (growthLocation && World.resources.length < maxResources) {
           const newResource = new Resource(growthLocation.x, growthLocation.y, CONFIG.resourceRadius);
           World.resources.push(newResource);
-          console.log(`🌿 Spontaneous growth at (${Math.round(growthLocation.x)}, ${Math.round(growthLocation.y)}) | Fertility: ${growthLocation.fertility.toFixed(2)}`);
+          // console.log(`🌿 Spontaneous growth at (${Math.round(growthLocation.x)}, ${Math.round(growthLocation.y)}) | Fertility: ${growthLocation.fertility.toFixed(2)}`);
         }
 
         FertilityField.update(dt, aliveCount, globalTick);
@@ -1982,7 +2019,7 @@ const loadedPolicyInfo = null;
           if (idx >= 0 && idx < World.bundles.length) {
             const removed = World.bundles.splice(idx, 1)[0];
             removed.destroy();
-            console.log(`💀 Agent ${removed.id} fully decayed and removed | Pop: ${World.bundles.length}`);
+            // console.log(`💀 Agent ${removed.id} fully decayed and removed | Pop: ${World.bundles.length}`);
           }
         }
       } catch (err) {
@@ -2118,7 +2155,7 @@ const loadedPolicyInfo = null;
 
     startSimulation({
       shouldStep: () => !World.paused,
-      getMode: () => trainingModule.getLearningMode(),
+      getMode: () => trainingModule?.getLearningMode?.() || 'play',
       getPhases: () => simulationPhases,
       beginTick,
       endTick: (context) => {
@@ -2135,7 +2172,10 @@ const loadedPolicyInfo = null;
       }
     });
 
-    const initTrainingUI = () => trainingModule.initializeTrainingUI();
+    // Initialize Adaptive Heuristics UI
+    const adaptiveHeuristicsUI = new AdaptiveHeuristicsUI(document.body, trainingModule);
+
+    const initTrainingUI = () => trainingModule?.initializeTrainingUI?.();
 
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', initTrainingUI, { once: true });
