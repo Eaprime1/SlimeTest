@@ -1,3 +1,14 @@
+<!-- ormd:0.1 -->
+---
+title: "Scent Gradient Reward System"
+authors: ["Essence Engine Team"]
+dates:
+  created: '2025-11-11T05:40:38.733223Z'
+links: []
+status: "complete"
+description: "Essence Engine documentation"
+---
+
 # Scent Gradient Reward System
 
 ## Overview

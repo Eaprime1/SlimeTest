@@ -1,3 +1,14 @@
+<!-- ormd:0.1 -->
+---
+title: "Multi-Agent Learning Guide"
+authors: ["Essence Engine Team"]
+dates:
+  created: '2025-11-11T05:40:38.730258Z'
+links: []
+status: "complete"
+description: "Essence Engine documentation"
+---
+
 # 🤝 Multi-Agent Learning Guide
 
 ## What Just Changed

@@ -1,3 +1,14 @@
+<!-- ormd:0.1 -->
+---
+title: "State ExportImport System"
+authors: ["Essence Engine Team"]
+dates:
+  created: '2025-11-11T05:40:38.728356Z'
+links: []
+status: "complete"
+description: "Essence Engine documentation"
+---
+
 # State Export/Import System
 
 This document describes the simulation state export and import functionality that allows saving and restoring the complete state of the Essence Engine simulation.

@@ -1,3 +1,14 @@
+<!-- ormd:0.1 -->
+---
+title: "Signal Field System Overview"
+authors: ["Essence Engine Team"]
+dates:
+  created: '2025-11-11T05:40:38.728138Z'
+links: []
+status: "complete"
+description: "Essence Engine documentation"
+---
+
 # Signal Field System Overview
 
 The signal architecture turns agent communication into a continuous field that any bundle can read or write. This document explains how the shared substrate is built, which events inject energy into it, and how agents interpret those gradients when deciding their next move.

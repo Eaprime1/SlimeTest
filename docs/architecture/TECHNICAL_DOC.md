@@ -1,3 +1,23 @@
+<!-- ormd:0.1 -->
+---
+title: "Essence Engine Technical Documentation"
+authors: ["Essence Engine Team"]
+dates:
+  created: '2025-11-11T00:00:00Z'
+links:
+  - id: learning-system
+    rel: references
+    to: "LEARNING_SYSTEM.md"
+  - id: signal-field
+    rel: references
+    to: "SIGNAL_FIELD_SYSTEM_OVERVIEW.md"
+  - id: trail-system
+    rel: defines
+    to: "#the-trail-system"
+status: "complete"
+description: "Core mechanics breakdown of the Essence Engine simulation including simulation loop, agent mechanics, and trail system"
+---
+
 # Essence Engine Technical Documentation
 
 This document provides a technical breakdown of the core mechanics of the Essence Engine simulation.

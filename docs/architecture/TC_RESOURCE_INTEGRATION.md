@@ -1,3 +1,14 @@
+<!-- ormd:0.1 -->
+---
+title: "TC Rule 110  Resource Generation Integration"
+authors: ["Essence Engine Team"]
+dates:
+  created: '2025-11-11T05:40:38.728854Z'
+links: []
+status: "complete"
+description: "Essence Engine documentation"
+---
+
 # TC Rule 110 → Resource Generation Integration
 
 This document describes how Rule 110 cellular automaton state can influence resource spawning, making the environment truly driven by Turing-complete computation.

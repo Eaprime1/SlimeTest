@@ -1,3 +1,14 @@
+<!-- ormd:0.1 -->
+---
+title: "Policy Analysis Tools - Complete Package"
+authors: ["Essence Engine Team"]
+dates:
+  created: '2025-11-11T05:40:38.723828Z'
+links: []
+status: "complete"
+description: "Essence Engine documentation"
+---
+
 # 🛠️ Policy Analysis Tools - Complete Package
 
 You now have a comprehensive analysis suite for understanding your essence agent learning!

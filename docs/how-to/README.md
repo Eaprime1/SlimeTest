@@ -1,3 +1,23 @@
+<!-- ormd:0.1 -->
+---
+title: "How-To Guides"
+authors: ["Essence Engine Team"]
+dates:
+  created: '2025-11-11T00:00:00Z'
+links:
+  - id: training-guide
+    rel: references
+    to: "TRAINING_GUIDE.md"
+  - id: policy-analyzer
+    rel: references
+    to: "POLICY_ANALYZER_GUIDE.md"
+  - id: architecture-docs
+    rel: references
+    to: "../architecture/README.md"
+status: "complete"
+description: "User-facing guides explaining how to use features, configure systems, and troubleshoot common issues"
+---
+
 # How-To Guides
 
 This directory contains user-facing guides that explain **how to use** various features and systems in Essence Engine.

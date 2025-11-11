@@ -1,3 +1,26 @@
+<!-- ormd:0.1 -->
+---
+title: "Architecture Documentation"
+authors: ["Essence Engine Team"]
+dates:
+  created: '2025-11-11T00:00:00Z'
+links:
+  - id: technical-doc
+    rel: references
+    to: "TECHNICAL_DOC.md"
+  - id: learning-system
+    rel: references
+    to: "LEARNING_SYSTEM.md"
+  - id: signal-field
+    rel: references
+    to: "SIGNAL_FIELD_SYSTEM_OVERVIEW.md"
+  - id: how-to-docs
+    rel: references
+    to: "../how-to/README.md"
+status: "complete"
+description: "Technical documentation explaining system architecture, design decisions, implementation details, and developer troubleshooting guides"
+---
+
 # Architecture Documentation
 
 This directory contains technical documentation that explains **how things work under the hood** in Essence Engine.

@@ -1,3 +1,14 @@
+<!-- ormd:0.1 -->
+---
+title: "TC (Turing Complete) Features in Browser"
+authors: ["Essence Engine Team"]
+dates:
+  created: '2025-11-11T05:40:38.733463Z'
+links: []
+status: "complete"
+description: "Essence Engine documentation"
+---
+
 # TC (Turing Complete) Features in Browser
 
 The Essence Engine simulation includes **Turing Complete** computational features that can run alongside your simulation! This guide explains what works in the browser and how to use it.

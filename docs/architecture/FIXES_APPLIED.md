@@ -1,3 +1,14 @@
+<!-- ormd:0.1 -->
+---
+title: "Integration Fixes Applied"
+authors: ["Essence Engine Team"]
+dates:
+  created: '2025-11-11T05:40:38.724423Z'
+links: []
+status: "complete"
+description: "Essence Engine documentation"
+---
+
 # 🔧 Integration Fixes Applied
 
 ## Summary
