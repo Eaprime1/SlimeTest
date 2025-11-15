@@ -8,7 +8,12 @@
     "start": "vite",
     "dev": "vite",
     "build": "vite build",
-    "serve": "vite preview"
+    "serve": "vite preview",
+    "launch": "bash launcher.sh",
+    "quick": "bash quickstart.sh",
+    "test:all": "node --loader ./test/esm-loader.mjs test/movement.test.js && node --loader ./test/esm-loader.mjs test/metabolism.test.js",
+    "test:movement": "node --loader ./test/esm-loader.mjs test/movement.test.js",
+    "test:metabolism": "node --loader ./test/esm-loader.mjs test/metabolism.test.js"
   },
   "dependencies": {
     "pixi.js": "^7.4.3"
