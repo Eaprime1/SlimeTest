@@ -1,3 +1,14 @@
+<!-- ormd:0.1 -->
+---
+title: "Policy Analyzer - Quick Summary"
+authors: ["Essence Engine Team"]
+dates:
+  created: '2025-11-11T05:40:38.723526Z'
+links: []
+status: "complete"
+description: "Essence Engine documentation"
+---
+
 # 📊 Policy Analyzer - Quick Summary
 
 ## What The Output Tells You

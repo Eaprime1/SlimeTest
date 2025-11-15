@@ -1,3 +1,14 @@
+<!-- ormd:0.1 -->
+---
+title: "Adaptive Reward System - Decision Tree"
+authors: ["Essence Engine Team"]
+dates:
+  created: '2025-11-11T05:40:38.726861Z'
+links: []
+status: "complete"
+description: "Essence Engine documentation"
+---
+
 # 🌳 Adaptive Reward System - Decision Tree
 
 ## Start Here: Should You Implement This?

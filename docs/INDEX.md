@@ -1,3 +1,20 @@
+<!-- ormd:0.1 -->
+---
+title: "Documentation Index"
+authors: ["Essence Engine Team"]
+dates:
+  created: '2025-11-11T00:00:00Z'
+links:
+  - id: how-to-guides
+    rel: defines
+    to: "#user-guides-how-to"
+  - id: architecture-docs
+    rel: defines
+    to: "#technical-documentation-architecture"
+status: "complete"
+description: "Central index for Essence Engine documentation covering user guides and technical architecture"
+---
+
 # Documentation Index
 
 This index provides an overview of the Essence Engine documentation structure. Documentation is organized into two main categories:

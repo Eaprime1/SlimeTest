@@ -1,3 +1,14 @@
+<!-- ormd:0.1 -->
+---
+title: "Policy Training Tips  Troubleshooting"
+authors: ["Essence Engine Team"]
+dates:
+  created: '2025-11-11T05:40:38.732075Z'
+links: []
+status: "complete"
+description: "Essence Engine documentation"
+---
+
 # 🎓 Policy Training Tips & Troubleshooting
 
 ## Why is my policy ignoring resources?

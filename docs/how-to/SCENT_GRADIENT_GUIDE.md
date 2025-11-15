@@ -1,4 +1,29 @@
+<!-- ormd:0.1 -->
+---
+title: "Scent Gradient Reward System"
+authors: ["Essence Engine Team"]
+dates:
+  created: '2025-11-11T05:40:38.733223Z'
+links: []
+status: "complete"
+description: "Essence Engine documentation"
+---
+
 # Scent Gradient Reward System
+
+## Code Reference
+
+**Primary Implementation File:** [`scentGradient.js`](../../scentGradient.js)
+
+**Configuration:** `config.js` → `CONFIG.scentGradient`
+
+**Main Functions:**
+- `calculateScentIntensity()` - Compute scent at any point
+- `getScentGradient()` - Get direction and intensity
+- `getFoodDensitySensing()` - Multi-scale sensing
+- `visualizeScentGradient()` / `visualizeScentHeatmap()` - Debug visualization
+
+---
 
 ## Overview
 

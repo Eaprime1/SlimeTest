@@ -1,3 +1,14 @@
+<!-- ormd:0.1 -->
+---
+title: "Own Trail Penalty System - Breaking Circuit Running"
+authors: ["Essence Engine Team"]
+dates:
+  created: '2025-11-11T05:40:38.730594Z'
+links: []
+status: "complete"
+description: "Essence Engine documentation"
+---
+
 # 🔄 Own Trail Penalty System - Breaking Circuit Running
 
 ## ✅ Implementation Complete!

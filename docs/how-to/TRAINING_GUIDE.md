@@ -1,4 +1,35 @@
+<!-- ormd:0.1 -->
+---
+title: "🎓 Training System User Guide"
+authors: ["Essence Engine Team"]
+dates:
+  created: '2025-11-11T00:00:00Z'
+links:
+  - id: controls
+    rel: defines
+    to: "#controls"
+  - id: training-panel
+    rel: defines
+    to: "#training-panel-features"
+  - id: learning-curve
+    rel: defines
+    to: "#learning-curve"
+status: "complete"
+description: "User guide for training the Essence Engine with reinforcement learning, including CEM training workflow and policy management"
+---
+
 # 🎓 Training System User Guide
+
+## Code Reference
+
+**Primary Files:**
+- `trainingUI.js` - Training UI panel and controls
+- `learner.js` - CEMLearner & TrainingManager (CEM algorithm)
+- `src/core/training.js` - Training orchestration and episode management
+
+**Configuration:** `config.js` → `CONFIG.learning`
+
+---
 
 ## 🎉 Training is Now Fully Integrated!
 

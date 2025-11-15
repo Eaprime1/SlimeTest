@@ -1,3 +1,14 @@
+<!-- ormd:0.1 -->
+---
+title: "Quick Start: TC-Resource Integration"
+authors: ["Essence Engine Team"]
+dates:
+  created: '2025-11-11T05:40:38.733754Z'
+links: []
+status: "complete"
+description: "Essence Engine documentation"
+---
+
 # Quick Start: TC-Resource Integration
 
 Link Rule 110 cellular automaton to resource spawning for a truly computational living environment!

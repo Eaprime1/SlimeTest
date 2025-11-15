@@ -1,3 +1,14 @@
+<!-- ormd:0.1 -->
+---
+title: "Chi Recycling  Decay System"
+authors: ["Essence Engine Team"]
+dates:
+  created: '2025-11-11T05:40:38.724136Z'
+links: []
+status: "complete"
+description: "Essence Engine documentation"
+---
+
 # Chi Recycling & Decay System
 
 ## Overview
