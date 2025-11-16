@@ -21,6 +21,8 @@ export function createMitosisSystem({
   getCanvasHeight,
   getWorld,
   createChildBundle,
+  getAdaptiveHeuristics,
+  onReproduction,
   random = TcRandom,
   config
 }) {
@@ -39,10 +41,14 @@ export function createMitosisSystem({
 
   const evaluateBaseline = (parent) => {
     try {
+      const adaptiveHeuristics = typeof getAdaptiveHeuristics === 'function' ? getAdaptiveHeuristics() : null;
+      const adaptiveControls = adaptiveHeuristics?.getMitosisBaselineAdjustments?.() || null;
       return computeBaselineMitosisProbability({
         bundle: parent,
         world: getWorld?.(),
-        config
+        config,
+        overrides: adaptiveControls || undefined,
+        rng
       });
     } catch (error) {
       console.warn('Baseline mitosis evaluation failed:', error?.message || error);
@@ -111,10 +117,11 @@ export function createMitosisSystem({
     });
   }
 
-  function performMitosis(parent) {
+  function performMitosis(parent, baseline) {
     if (!canMitosis(parent)) return null;
 
-    parent.chi -= mitosisConfig.cost;
+    const costMultiplier = clamp(baseline?.adjustments?.divisionCostMultiplier ?? 1, 0.2, 3);
+    parent.chi -= mitosisConfig.cost * costMultiplier;
 
     const headingNoise = mitosisConfig.inheritHeading
       ? (rng() - 0.5) * (mitosisConfig.headingNoise ?? DEFAULT_HEADING_NOISE)
@@ -136,6 +143,9 @@ export function createMitosisSystem({
 
     if (child) {
       parent.lastMitosisTick = currentTick();
+      if (typeof onReproduction === 'function') {
+        onReproduction({ parent, child, baseline, tick: currentTick(), mode: 'mitosis' });
+      }
     }
 
     return child;
@@ -180,7 +190,7 @@ export function createMitosisSystem({
       return null;
     }
 
-    return performMitosis(parent);
+    return performMitosis(parent, baseline);
   }
 
   function evaluateReadiness(parent) {

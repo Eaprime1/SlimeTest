@@ -83,20 +83,21 @@ function computeHarmony(bundle, world) {
   return clamp01((signalAvg + resourceHarmony) / 2);
 }
 
-export function computeBaselineSignals({ bundle, world, config }) {
+export function computeBaselineSignals({ bundle, world, config, overrides = {} }) {
   const mitosisConfig = config?.mitosis ?? {};
   const baselineConfig = mitosisConfig.baseline ?? {};
+  const gains = overrides.signalGains || {};
 
-  const capacity = computeCapacity(bundle, mitosisConfig);
-  const strain = computeStrain(bundle, mitosisConfig);
-  const pressure = computePressure(bundle, world, mitosisConfig, baselineConfig);
-  const opportunity = computeOpportunity(bundle, world, config, baselineConfig);
-  const harmony = computeHarmony(bundle, world);
+  const capacity = clamp01((computeCapacity(bundle, mitosisConfig)) * (gains.capacity ?? 1));
+  const strain = clamp01((computeStrain(bundle, mitosisConfig)) * (gains.strain ?? 1));
+  const pressure = clamp01((computePressure(bundle, world, mitosisConfig, baselineConfig)) * (gains.pressure ?? 1));
+  const opportunity = clamp01((computeOpportunity(bundle, world, config, baselineConfig)) * (gains.opportunity ?? 1));
+  const harmony = clamp01((computeHarmony(bundle, world)) * (gains.harmony ?? 1));
 
   return { capacity, strain, pressure, opportunity, harmony };
 }
 
-export function computeBaselineMitosisProbability({ bundle, world, config }) {
+export function computeBaselineMitosisProbability({ bundle, world, config, overrides = {}, rng }) {
   const mitosisConfig = config?.mitosis ?? {};
   const baselineConfig = mitosisConfig.baseline ?? {};
 
@@ -105,18 +106,23 @@ export function computeBaselineMitosisProbability({ bundle, world, config }) {
       probability: 1,
       score: 0,
       threshold: baselineConfig.threshold ?? 0.5,
-      signals: computeBaselineSignals({ bundle, world, config })
+      signals: computeBaselineSignals({ bundle, world, config, overrides }),
+      adjustments: overrides || null
     };
   }
 
-  const signals = computeBaselineSignals({ bundle, world, config });
-  const weights = baselineConfig.weights ?? {};
-  const wCap = weights.capacity ?? 1;
-  const wStrain = weights.strain ?? 1;
-  const wPressure = weights.pressure ?? 1;
-  const wOpp = weights.opportunity ?? 1;
-  const wHarmony = weights.harmony ?? 1;
+  const signals = computeBaselineSignals({ bundle, world, config, overrides });
+  const weights = overrides.weights || baselineConfig.weights || {};
+  const wCap = weights.capacity ?? (baselineConfig.weights?.capacity ?? 1);
+  const wStrain = weights.strain ?? (baselineConfig.weights?.strain ?? 1);
+  const wPressure = weights.pressure ?? (baselineConfig.weights?.pressure ?? 1);
+  const wOpp = weights.opportunity ?? (baselineConfig.weights?.opportunity ?? 1);
+  const wHarmony = weights.harmony ?? (baselineConfig.weights?.harmony ?? 1);
   const threshold = baselineConfig.threshold ?? 0.5;
+  const noiseLevel = overrides.noise ?? 0;
+  const noise = noiseLevel > 0
+    ? ((typeof rng === 'function' ? rng() : Math.random()) - 0.5) * noiseLevel
+    : 0;
 
   const mitosisScore =
     wCap * signals.capacity -
@@ -125,12 +131,13 @@ export function computeBaselineMitosisProbability({ bundle, world, config }) {
     wOpp * signals.opportunity +
     wHarmony * signals.harmony;
 
-  const probability = sigmoid(mitosisScore - threshold);
+  const probability = sigmoid(mitosisScore - threshold + noise);
 
   return {
     probability: clamp01(probability),
     score: mitosisScore,
     threshold,
-    signals
+    signals,
+    adjustments: overrides || null
   };
 }

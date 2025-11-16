@@ -2063,6 +2063,9 @@ let trainingModule = null;
 
         FertilityField.update(dt, aliveCount, globalTick);
       }
+
+      // Mitosis-specific adaptive feedback
+      trainingModule?.processMitosisFeedback?.(globalTick);
     };
 
     const reproductionPhase = ({ mode }) => {
