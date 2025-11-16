@@ -82,6 +82,11 @@ export class TrainingUI {
         <div>Signal Coherence: <span id="stat-signal-coherence">-</span></div>
         <div>Signal SNR: <span id="stat-signal-snr">-</span></div>
         <div>Signal Power: <span id="stat-signal-power">-</span></div>
+        <div style="margin-top:8px; color:#ff9cf0;">Mitosis (baseline):</div>
+        <div>Prob: <span id="stat-mito-prob">-</span> thr: <span id="stat-mito-thr">-</span></div>
+        <div>w1: <span id="stat-mito-w1">-</span> w2: <span id="stat-mito-w2">-</span> w3: <span id="stat-mito-w3">-</span></div>
+        <div>w4: <span id="stat-mito-w4">-</span> w5: <span id="stat-mito-w5">-</span></div>
+        <div>sig: <span id="stat-mito-sig">-</span> noise: <span id="stat-mito-noise">-</span> cost: <span id="stat-mito-cost">-</span></div>
       </div>
     `;
     this.panel.appendChild(statsSection);
@@ -431,6 +436,8 @@ export class TrainingUI {
     document.getElementById('stat-mean').textContent = stats.meanReward ?
       stats.meanReward.toFixed(2) : '-';
     document.getElementById('stat-status').textContent = stats.status || 'Idle';
+
+    this.updateMitosisStats(stats?.mitosis);
   }
 
   updateSignalStats(signal) {
@@ -457,6 +464,31 @@ export class TrainingUI {
     if (powerEl) {
       powerEl.textContent = totalPower.length ? totalPower.map((v, i) => `C${i}:${v.toFixed(1)}`).join(' ') : '-';
     }
+  }
+
+  updateMitosisStats(mitosis) {
+    const setVal = (id, value, digits = 2) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.textContent = value === null || value === undefined ? '-' : Number(value).toFixed(digits);
+    };
+
+    if (!mitosis) {
+      ['stat-mito-prob','stat-mito-thr','stat-mito-w1','stat-mito-w2','stat-mito-w3','stat-mito-w4','stat-mito-w5','stat-mito-sig','stat-mito-noise','stat-mito-cost']
+        .forEach((id) => setVal(id, null, 0));
+      return;
+    }
+
+    setVal('stat-mito-prob', mitosis.avgProbability ?? mitosis.probability ?? null, 0);
+    setVal('stat-mito-thr', mitosis.threshold ?? null, 2);
+    setVal('stat-mito-w1', mitosis.weights?.capacity);
+    setVal('stat-mito-w2', mitosis.weights?.strain);
+    setVal('stat-mito-w3', mitosis.weights?.pressure);
+    setVal('stat-mito-w4', mitosis.weights?.opportunity);
+    setVal('stat-mito-w5', mitosis.weights?.harmony);
+    setVal('stat-mito-sig', mitosis.signalGain);
+    setVal('stat-mito-noise', mitosis.noise, 2);
+    setVal('stat-mito-cost', mitosis.costMultiplier);
   }
   
   // Show loaded policy info
